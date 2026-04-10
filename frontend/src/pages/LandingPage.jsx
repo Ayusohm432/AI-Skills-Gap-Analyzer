@@ -16,9 +16,16 @@ export default function LandingPage() {
           </div>
           SkillGap<span className="text-blue-400 font-normal">Analyzer</span>
         </div>
-        <div className="flex gap-8 items-center text-sm font-medium tracking-wide">
+        <div className="flex gap-6 items-center text-sm font-medium tracking-wide">
           <Link to="/upload" className="text-slate-300 hover:text-white transition-colors duration-300">Upload Resume</Link>
           <Link to="/dashboard" className="text-slate-300 hover:text-white transition-colors duration-300">Sample Results</Link>
+          <Link to="/login" className="text-slate-300 hover:text-white transition-colors duration-300">Log in</Link>
+          <Link
+            to="/register"
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors duration-300 shadow-[0_0_12px_rgba(37,99,235,0.3)]"
+          >
+            Sign up
+          </Link>
         </div>
       </nav>
 
