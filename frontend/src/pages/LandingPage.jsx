@@ -1,92 +1,223 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'motion/react';
+import { ArrowRight, Sparkles, Target, BookOpen, TrendingUp, Upload, Zap } from 'lucide-react';
 import InteractiveBackground from '../components/InteractiveBackground';
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
+import PageTransition from '../components/PageTransition';
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 30 },
+  visible: (i = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.1, duration: 0.6, ease: [0.22, 1, 0.36, 1] }
+  })
+};
+
+const stats = [
+  { value: '10+', label: 'Tech Roles Covered' },
+  { value: '50+', label: 'Skills Tracked' },
+  { value: '8wk', label: 'Avg. Roadmap Length' },
+];
+
+const features = [
+  {
+    icon: Upload,
+    title: 'Drop Your Resume',
+    desc: 'Upload your CV and we parse it using advanced NLP — no templates, no forms, just your real document.',
+    accent: 'var(--accent-warm)',
+    accentDim: 'var(--accent-warm-dim)',
+  },
+  {
+    icon: Target,
+    title: 'See What\'s Missing',
+    desc: 'We compare your skills against real job requirements and show you exactly which gaps are holding you back.',
+    accent: 'var(--accent-coral)',
+    accentDim: 'var(--accent-coral-dim)',
+  },
+  {
+    icon: BookOpen,
+    title: 'Get Your Roadmap',
+    desc: 'Receive a structured, week-by-week learning plan built around your specific missing skills — not generic advice.',
+    accent: 'var(--accent-teal)',
+    accentDim: 'var(--accent-teal-dim)',
+  },
+];
 
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen flex flex-col font-sans overflow-hidden text-slate-200">
+    <PageTransition>
+      <div className="relative min-h-screen flex flex-col overflow-hidden">
+        <InteractiveBackground />
+        <Navbar />
 
-      <InteractiveBackground />
+        {/* ===== HERO ===== */}
+        <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 pt-32 pb-20 lg:pt-40 lg:pb-28">
+          <div className="max-w-5xl mx-auto w-full">
+            {/* Badge */}
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              custom={0}
+              className="flex justify-center mb-8"
+            >
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)]/80">
+                <Sparkles size={14} className="text-[var(--accent-warm)]" />
+                <span className="text-xs font-medium text-[var(--text-muted)] tracking-wide">
+                  Your career, intelligently mapped
+                </span>
+              </div>
+            </motion.div>
 
-      {/* Navigation */}
-      <nav className="relative z-10 px-8 py-6 flex justify-between items-center max-w-7xl mx-auto w-full">
-        <div className="font-bold tracking-tight text-xl text-white flex items-center gap-3">
-          <div className="w-6 h-6 rounded bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
-            <div className="w-2 h-2 bg-white rounded-sm"></div>
+            {/* Headline */}
+            <motion.h1
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              custom={1}
+              className="text-center text-4xl sm:text-5xl md:text-6xl lg:text-7xl tracking-tight leading-[1.08] mb-7"
+            >
+              <span className="text-[var(--text-primary)] font-semibold">Find what's </span>
+              <span className="font-serif italic text-[var(--accent-warm)]">missing</span>
+              <br />
+              <span className="text-[var(--text-primary)] font-semibold">between you & your </span>
+              <span className="font-serif italic text-[var(--accent-teal)]">dream role</span>
+            </motion.h1>
+
+            {/* Subtitle */}
+            <motion.p
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              custom={2}
+              className="text-center text-base md:text-lg text-[var(--text-secondary)] max-w-2xl mx-auto mb-12 font-light leading-relaxed"
+            >
+              Upload your resume, pick a target role, and our NLP engine will identify
+              your skill gaps — then generate a personalized learning roadmap to close them.
+            </motion.p>
+
+            {/* CTAs */}
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              custom={3}
+              className="flex flex-col sm:flex-row items-center justify-center gap-4"
+            >
+              <Link to="/upload" className="btn-warm group" id="hero-cta-primary">
+                Start Your Analysis
+                <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+              </Link>
+              <Link to="/dashboard" className="btn-ghost" id="hero-cta-secondary">
+                See Example Results
+              </Link>
+            </motion.div>
+
+            {/* Stats Row */}
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="visible"
+              custom={4}
+              className="flex items-center justify-center gap-10 mt-16"
+            >
+              {stats.map((stat, i) => (
+                <div key={i} className="text-center">
+                  <div className="text-2xl md:text-3xl font-bold text-[var(--text-primary)]">{stat.value}</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mt-1 uppercase tracking-wider">{stat.label}</div>
+                </div>
+              ))}
+            </motion.div>
           </div>
-          SkillGap<span className="text-blue-400 font-normal">Analyzer</span>
-        </div>
-        <div className="flex gap-8 items-center text-sm font-medium tracking-wide">
-          <Link to="/upload" className="text-slate-300 hover:text-white transition-colors duration-300">Upload Resume</Link>
-          <Link to="/dashboard" className="text-slate-300 hover:text-white transition-colors duration-300">Sample Results</Link>
-        </div>
-      </nav>
+        </main>
 
-      {/* Hero Section */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-24 text-center max-w-4xl mx-auto mt-10">
+        {/* ===== HOW IT WORKS ===== */}
+        <section className="relative z-10 py-24 lg:py-32">
+          <div className="max-w-6xl mx-auto px-6 lg:px-8">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-100px' }}
+              transition={{ duration: 0.6 }}
+              className="text-center mb-16"
+            >
+              <p className="text-[var(--accent-warm)] uppercase tracking-[0.2em] text-xs font-semibold mb-4">How it works</p>
+              <h2 className="text-3xl md:text-4xl font-semibold text-[var(--text-primary)] tracking-tight">
+                Three steps to <span className="font-serif italic font-normal text-[var(--accent-teal)]">clarity</span>
+              </h2>
+            </motion.div>
 
-        <div className="inline-block border border-blue-500/30 bg-blue-900/10 px-4 py-1.5 text-xs font-semibold tracking-widest text-blue-300 rounded-full mb-8 uppercase backdrop-blur-sm shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-          Empowering University Students
-        </div>
+            <div className="grid md:grid-cols-3 gap-6 lg:gap-8">
+              {features.map((f, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 30 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: '-80px' }}
+                  transition={{ delay: i * 0.15, duration: 0.5 }}
+                  className="group relative glass-card p-8 transition-all duration-500 hover:translate-y-[-4px] noise-overlay overflow-hidden"
+                >
+                  {/* Accent line top */}
+                  <div
+                    className="absolute top-0 left-8 right-8 h-[2px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                    style={{ background: f.accent }}
+                  />
 
-        <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white mb-8 leading-[1.1] drop-shadow-2xl">
-          Bridge the gap between <br />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300 italic font-medium">education</span> and <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-purple-400 italic font-medium">industry</span>.
-        </h1>
+                  <div className="relative z-10">
+                    {/* Step number */}
+                    <div className="flex items-center justify-between mb-6">
+                      <div
+                        className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110"
+                        style={{ background: f.accentDim }}
+                      >
+                        <f.icon size={20} style={{ color: f.accent }} />
+                      </div>
+                      <span className="text-[var(--text-muted)] text-xs font-mono">0{i + 1}</span>
+                    </div>
 
-        <p className="text-lg md:text-xl text-slate-300 max-w-3xl mb-12 leading-relaxed font-light">
-          A definitive career roadmap platform.
-          Upload your resume, select your target tech role, and let our NLP engine
-          uncover your missing skills to generate a personalized week-by-week learning syllabus.
-        </p>
-
-        <div className="flex flex-col sm:flex-row gap-5 w-full justify-center">
-          <Link
-            to="/upload"
-            className="group relative px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white font-medium transition-all text-center rounded shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] overflow-hidden"
-          >
-            <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-[150%] group-hover:animate-shimmer"></div>
-            Start Your Analysis
-          </Link>
-          <Link
-            to="/dashboard"
-            className="px-8 py-4 bg-slate-900/50 hover:bg-slate-800 backdrop-blur-md border border-slate-700 text-slate-200 font-medium transition-all text-center rounded"
-          >
-            View Example Roadmap
-          </Link>
-        </div>
-      </main>
-
-      {/* Philosophy / Features Grid */}
-      <section className="relative z-10 bg-slate-950/50 backdrop-blur-xl border-t border-slate-800/50 py-20 mt-auto">
-        <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-3 gap-12 text-left">
-
-          <div className="flex flex-col group p-6 rounded-lg hover:bg-slate-900/50 transition-colors border border-transparent hover:border-slate-800">
-            <div className="text-blue-500 text-3xl mb-4 font-light font-mono group-hover:scale-110 transition-transform origin-left">01.</div>
-            <h3 className="text-white text-lg font-semibold mb-3 tracking-wide">Intelligent Extraction</h3>
-            <p className="text-slate-400 leading-relaxed font-light text-sm">
-              We process your CV using Natural Language Processing to accurately identify the tools, frameworks, and methodologies you already possess.
-            </p>
+                    <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-3 tracking-tight">{f.title}</h3>
+                    <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{f.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </div>
+        </section>
 
-          <div className="flex flex-col group p-6 rounded-lg hover:bg-slate-900/50 transition-colors border border-transparent hover:border-slate-800">
-            <div className="text-cyan-400 text-3xl mb-4 font-light font-mono group-hover:scale-110 transition-transform origin-left">02.</div>
-            <h3 className="text-white text-lg font-semibold mb-3 tracking-wide">Market Alignment</h3>
-            <p className="text-slate-400 leading-relaxed font-light text-sm">
-              Your profile is cross-referenced against thousands of real-world job descriptions, pinpointing the exact technical requirements you are missing.
-            </p>
+        {/* ===== CTA BAND ===== */}
+        <section className="relative z-10 py-20 lg:py-24">
+          <div className="max-w-4xl mx-auto px-6 text-center">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true, margin: '-100px' }}
+              transition={{ duration: 0.6 }}
+              className="glass-card p-12 lg:p-16 relative overflow-hidden noise-overlay glow-warm"
+            >
+              <div className="relative z-10">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-[var(--accent-warm-dim)] flex items-center justify-center mb-6">
+                  <Zap size={24} className="text-[var(--accent-warm)]" />
+                </div>
+                <h2 className="text-2xl md:text-3xl font-semibold text-[var(--text-primary)] mb-4 tracking-tight">
+                  Ready to see where you stand?
+                </h2>
+                <p className="text-[var(--text-secondary)] max-w-lg mx-auto mb-8 font-light">
+                  It takes less than a minute. Upload your resume, choose a role, and get your personalized skill gap report instantly.
+                </p>
+                <Link to="/upload" className="btn-warm group" id="cta-band-button">
+                  Analyze My Resume
+                  <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
+                </Link>
+              </div>
+            </motion.div>
           </div>
+        </section>
 
-          <div className="flex flex-col group p-6 rounded-lg hover:bg-slate-900/50 transition-colors border border-transparent hover:border-slate-800">
-            <div className="text-indigo-400 text-3xl mb-4 font-light font-mono group-hover:scale-110 transition-transform origin-left">03.</div>
-            <h3 className="text-white text-lg font-semibold mb-3 tracking-wide">Structured Syllabus</h3>
-            <p className="text-slate-400 leading-relaxed font-light text-sm">
-              Receive a concrete, chronological learning roadmap. We map out what you need to study, week by week, to reach the market standard.
-            </p>
-          </div>
-
-        </div>
-      </section>
-    </div>
+        <Footer />
+      </div>
+    </PageTransition>
   );
 }
