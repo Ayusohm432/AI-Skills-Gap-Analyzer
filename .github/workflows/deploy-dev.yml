@@ -5,6 +5,9 @@ on:
     branches:
       - development
 
+permissions:
+  contents: write
+
 jobs:
   deploy-backend-staging:
     runs-on: ubuntu-latest
