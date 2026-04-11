@@ -9,3 +9,7 @@ pydantic
 pydantic-settings
 gunicorn
 python-dotenv
+bcrypt
+python-jose[cryptography]
+passlib[bcrypt]
+slowapi

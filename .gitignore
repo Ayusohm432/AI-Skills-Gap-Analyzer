@@ -41,3 +41,4 @@ pnpm-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+IMPLEMENTATION_PLAN_WITH_ML.md
