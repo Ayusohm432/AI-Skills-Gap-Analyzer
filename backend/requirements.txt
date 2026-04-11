@@ -13,3 +13,5 @@ bcrypt
 python-jose[cryptography]
 passlib[bcrypt]
 slowapi
+email-validator
+requests
