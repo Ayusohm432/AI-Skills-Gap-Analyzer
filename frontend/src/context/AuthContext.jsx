@@ -2,8 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { jwtDecode } from 'jwt-decode';
 import { loginApi, registerApi, logoutApi, refreshTokenApi } from '../api/auth';
 import { getAccessToken, clearAccessToken } from '../api/base';
+import { getProfileApi } from '../api/user';
 
-const AuthContext = createContext({});
+const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -28,8 +29,6 @@ export const AuthProvider = ({ children }) => {
       const expMs = decoded.exp * 1000;
       const now = Date.now();
       
-      // Refresh 1 minute before expiry. If expiry is < 1 min, refresh immediately.
-      // E.g., if token lives for 2 mins, delay is 1 minute (60000ms).
       const delay = Math.max(0, expMs - now - 60000); 
       
       console.log(`[Auth] Token expires in ${Math.round((expMs - now)/1000)}s. Scheduling refresh in ${Math.round(delay/1000)}s.`);
@@ -49,33 +48,38 @@ export const AuthProvider = ({ children }) => {
       if (newToken) {
         console.log("[Auth] Refresh successful.");
         scheduleTokenRefresh(newToken);
-        // We assume token payload has user info, but real backend might have a /me route
-        // For now, if we already have the user state, keep it. 
-        setIsAuthenticated(true);
-      } else {
-        throw new Error("No token returned");
+        
+        try {
+          const profile = await getProfileApi();
+          setUser(profile);
+          setIsAuthenticated(true);
+        } catch (profileErr) {
+          console.error("Failed to fetch profile after refresh", profileErr);
+          throw profileErr;
+        }
+        return true;
       }
+      return false;
     } catch (err) {
       console.warn("[Auth] Silent refresh failed, user logged out.", err);
-      // Only clear state if refresh explicitly fails indicating expired refresh cookie
       setUser(null);
       setIsAuthenticated(false);
       clearAccessToken();
+      return false;
     }
   }, [scheduleTokenRefresh]);
 
-  // Run once on mount to establish session from httpOnly cookie
   useEffect(() => {
     const initAuth = async () => {
       try {
-        await handleSilentRefresh();
-        // Here you would optimally fetch the User object from a /users/me endpoint
-        // For our architecture, the mock assigns a dummy user if missing 
-        setUser({ name: "Demo User", email: "demo@platform.com" });
-        setIsAuthenticated(true);
+        const success = await handleSilentRefresh();
+        if (!success) {
+          setIsAuthenticated(false);
+          setUser(null);
+        }
       } catch (err) {
-        // Not logged in initially, this is normal
         setIsAuthenticated(false);
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
@@ -108,12 +112,19 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     user,
+    updateUserState: setUser,
     isAuthenticated,
     isLoading,
     login,
     register,
     logout
   };
+
+  console.log("[AuthContext] Provider initialized with value", {
+    hasUser: !!value.user,
+    hasUpdateFunc: typeof value.updateUserState === 'function',
+    isAuthenticated: value.isAuthenticated
+  });
 
   return (
     <AuthContext.Provider value={value}>

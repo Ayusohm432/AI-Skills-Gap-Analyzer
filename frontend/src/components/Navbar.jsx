@@ -26,6 +26,10 @@ export default function Navbar() {
     { to: '/dashboard', label: 'Dashboard' },
   ];
 
+  if (isAuthenticated) {
+    navLinks.push({ to: '/profile', label: 'Profile' });
+  }
+
   const isActive = (path) => location.pathname === path;
 
   return (
@@ -91,7 +95,7 @@ export default function Navbar() {
                   {user?.name || user?.email?.split('@')[0] || 'User'}
                 </span>
                 <button
-                  onClick={() => { logout(); navigate('/'); }}
+                  onClick={() => { logout(); navigate('/login'); }}
                   className="text-sm font-medium px-4 py-2 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-all flex items-center gap-2 group"
                 >
                   <LogOut size={14} className="group-hover:text-[var(--accent-coral)] transition-colors" />
