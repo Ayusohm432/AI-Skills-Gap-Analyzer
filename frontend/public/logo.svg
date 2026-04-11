@@ -1,0 +1,10 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Brain Left Lobe -->
+  <path d="M45 30C35 30 25 38 25 50C25 62 35 70 45 70V30Z" fill="#f59e0b" fill-opacity="0.8"/>
+  <!-- Brain Right Lobe -->
+  <path d="M55 30C65 30 75 38 75 50C75 62 65 70 55 70V30Z" fill="#f59e0b"/>
+  <!-- Bar Chart / Skills -->
+  <rect x="35" y="75" width="6" height="10" rx="1" fill="#f59e0b" fill-opacity="0.6"/>
+  <rect x="47" y="72" width="6" height="13" rx="1" fill="#f59e0b" fill-opacity="0.8"/>
+  <rect x="59" y="68" width="6" height="17" rx="1" fill="#f59e0b"/>
+</svg>
