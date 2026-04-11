@@ -23,3 +23,12 @@ export const updateProfileApi = async (profileData) => {
   const errorData = await res.json().catch(() => ({}));
   throw new Error(errorData.detail || 'Failed to update profile');
 };
+
+export const getHistoryApi = async () => {
+  const res = await secureFetch('/api/v1/user/history');
+  if (res.ok) {
+    return await res.json();
+  }
+  const errorData = await res.json().catch(() => ({}));
+  throw new Error(errorData.detail || 'Failed to fetch history');
+};

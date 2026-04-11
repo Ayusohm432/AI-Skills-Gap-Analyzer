@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   User, Mail, Briefcase, Award, Save, 
-  Loader2, CheckCircle2, AlertCircle, Plus, X 
+  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight 
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getProfileApi, updateProfileApi } from '../api/user';
+import { getProfileApi, updateProfileApi, getHistoryApi } from '../api/user';
 import InteractiveBackground from '../components/InteractiveBackground';
 import Navbar from '../components/Navbar';
 import PageTransition from '../components/PageTransition';
+import { useNavigate } from 'react-router-dom';
 
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 20 },
@@ -25,32 +26,40 @@ export default function ProfilePage() {
     hasUpdateFunc: typeof updateUserState === 'function' 
   });
 
+  const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
+  const [history, setHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [newSkill, setNewSkill] = useState('');
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    const initPage = async () => {
       try {
-        const data = await getProfileApi();
-        setProfile(data);
+        const [profileData, historyData] = await Promise.all([
+          getProfileApi(),
+          getHistoryApi()
+        ]);
+        setProfile(profileData);
+        setHistory(historyData);
       } catch (err) {
-        console.error("Failed to fetch profile", err);
-        setMessage({ type: 'error', text: 'Failed to load profile data.' });
-        // Fallback to auth user if API fails
-        setProfile({
-          name: user?.name || '',
-          email: user?.email || '',
-          target_role: 'Not set',
-          skills: []
-        });
+        console.error("Failed to fetch initial profile data", err);
+        setMessage({ type: 'error', text: 'Error loading some profile data.' });
+        // Fallback for profile only
+        if (!profile) {
+           setProfile({
+            name: user?.name || '',
+            email: user?.email || '',
+            target_role: 'Not set',
+            skills: []
+          });
+        }
       } finally {
         setIsLoading(false);
       }
     };
-    fetchProfile();
+    initPage();
   }, [user]);
 
   const handleChange = (e) => {
@@ -73,6 +82,24 @@ export default function ProfilePage() {
       ...prev,
       skills: prev.skills.filter(s => s !== skillToRemove)
     }));
+  };
+
+  const handleViewAnalysis = (analysis) => {
+    localStorage.setItem("analysisResult", JSON.stringify(analysis));
+    navigate("/dashboard");
+  };
+
+  const formatDate = (dateStr) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString(undefined, { 
+      year: 'numeric', month: 'short', day: 'numeric' 
+    });
+  };
+
+  const getScoreColor = (score) => {
+    if (score >= 70) return 'text-[var(--accent-teal)]';
+    if (score >= 40) return 'text-[var(--accent-warm)]';
+    return 'text-[var(--accent-coral)]';
   };
 
   const handleSubmit = async (e) => {
@@ -283,6 +310,71 @@ export default function ProfilePage() {
                 </motion.div>
               </div>
             </div>
+
+            {/* Analysis History Section */}
+            <motion.div {...fadeUp(0.3)} className="mt-12">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Analysis History</h2>
+                  <p className="text-[var(--text-muted)] text-sm mt-1">Revisit your past skill gap assessments and roadmaps.</p>
+                </div>
+                <div className="text-xs font-semibold px-3 py-1 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)]">
+                  {history?.length || 0} Reports
+                </div>
+              </div>
+
+              {history && history.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {history.map((item, idx) => (
+                    <motion.div
+                      key={item.id}
+                      {...fadeUp(0.3 + (idx * 0.05))}
+                      className="glass-card p-6 hover:border-[var(--accent-warm)]/30 transition-all group flex flex-col justify-between"
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="p-2.5 rounded-xl bg-[var(--bg-deep)]/50 text-[var(--accent-warm)]">
+                          < Award size={20} />
+                        </div>
+                        <span className={`text-xl font-bold ${getScoreColor(item.readiness_score)}`}>
+                          {Math.round(item.readiness_score)}%
+                        </span>
+                      </div>
+                      
+                      <div className="mb-6">
+                        <h3 className="font-bold text-[var(--text-primary)] group-hover:text-[var(--accent-warm)] transition-colors line-clamp-1">
+                          {item.target_role}
+                        </h3>
+                        <p className="text-xs text-[var(--text-muted)] mt-1 flex items-center gap-1.5">
+                          Analyze on {formatDate(item.created_at)}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleViewAnalysis(item)}
+                        className="w-full py-2.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs font-semibold hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-all flex items-center justify-center gap-2 group/btn"
+                      >
+                        View Full Report
+                        <ChevronRight size={14} className="group-hover/btn:translate-x-0.5 transition-transform" />
+                      </button>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div className="glass-card p-12 text-center border-dashed border-2">
+                  <div className="w-16 h-16 rounded-2xl bg-[var(--bg-deep)] flex items-center justify-center mx-auto mb-4 border border-[var(--border-subtle)]">
+                    <BookOpen size={24} className="text-[var(--text-muted)]" />
+                  </div>
+                  <h3 className="text-[var(--text-primary)] font-bold mb-1">No analysis history yet</h3>
+                  <p className="text-[var(--text-muted)] text-sm mb-6 max-w-xs mx-auto">Upload your first resume to start tracking your skill gaps and career growth.</p>
+                  <button 
+                    onClick={() => navigate('/upload')}
+                    className="inline-flex items-center gap-2 text-[var(--accent-warm)] text-sm font-semibold hover:underline"
+                  >
+                    Analyze your first resume <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+            </motion.div>
           </div>
         </main>
       </div>
