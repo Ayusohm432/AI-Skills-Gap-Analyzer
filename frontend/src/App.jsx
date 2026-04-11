@@ -6,6 +6,8 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -15,8 +17,16 @@ function AnimatedRoutes() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
-        <Route path="/upload" element={<UploadPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/upload" element={
+          <ProtectedRoute>
+            <UploadPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        } />
       </Routes>
     </AnimatePresence>
   );
@@ -24,9 +34,11 @@ function AnimatedRoutes() {
 
 function App() {
   return (
-    <Router>
-      <AnimatedRoutes />
-    </Router>
+    <AuthProvider>
+      <Router>
+        <AnimatedRoutes />
+      </Router>
+    </AuthProvider>
   );
 }
 

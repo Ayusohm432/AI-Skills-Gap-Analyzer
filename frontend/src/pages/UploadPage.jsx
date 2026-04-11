@@ -12,6 +12,8 @@ export default function UploadPage() {
   const [role, setRole] = useState("Auto Detect");
   const [customRole, setCustomRole] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState("");
   const [error, setError] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [roleOptions, setRoleOptions] = useState([
@@ -42,10 +44,31 @@ export default function UploadPage() {
     fetchRoles();
   }, []);
 
+  const validateAndSetFile = (selectedFile) => {
+    if (!selectedFile) return;
+    
+    // 1. Size Validation (5MB max)
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      setError("File exceeds the 5MB size limit. Please choose a smaller file.");
+      setFile(null);
+      return;
+    }
+
+    // 2. Type Validation
+    const ext = selectedFile.name.split('.').pop().toLowerCase();
+    if (!['pdf', 'doc', 'docx', 'txt'].includes(ext)) {
+      setError("Invalid file format. Please upload a PDF, DOCX, or TXT file.");
+      setFile(null);
+      return;
+    }
+
+    setError(null);
+    setFile(selectedFile);
+  };
+
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      setError(null);
+      validateAndSetFile(e.target.files[0]);
     }
   };
 
@@ -64,8 +87,7 @@ export default function UploadPage() {
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files?.[0];
     if (droppedFile) {
-      setFile(droppedFile);
-      setError(null);
+      validateAndSetFile(droppedFile);
     }
   }, []);
 
@@ -77,6 +99,8 @@ export default function UploadPage() {
     }
 
     setLoading(true);
+    setUploadProgress(0);
+    setUploadStatus("Preparing document...");
     setError(null);
 
     const formData = new FormData();
@@ -89,24 +113,44 @@ export default function UploadPage() {
     formData.append("role", finalRole);
 
     try {
+      // Simulate fake upload progress while waiting since fetch doesn't support native upload progress
+      // and backend processing actually takes the most time.
+      let progress = 0;
+      const progressInterval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress > 85) progress = 85; // Cap at 85% until backend resolves
+        setUploadProgress(progress);
+        
+        if (progress > 20) setUploadStatus("Uploading file natively...");
+        if (progress > 50) setUploadStatus("Extracting raw text...");
+        if (progress > 75) setUploadStatus("AI NLP matching against role requirements...");
+      }, 500);
+
       const apiUrl = import.meta.env.DEV ? "http://127.0.0.1:8000" : (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000");
       const response = await fetch(`${apiUrl}/api/v1/analyze/resume`, {
         method: "POST",
         body: formData,
+        // credentials: "include" // We use fetch directly here. If using secureFetch later, swap over.
       });
+
+      clearInterval(progressInterval);
 
       if (!response.ok) {
         throw new Error(`Server responded with status: ${response.status}`);
       }
 
+      setUploadProgress(100);
+      setUploadStatus("Analysis Complete!");
+
       const data = await response.json();
       localStorage.setItem("analysisResult", JSON.stringify(data));
-      navigate("/dashboard");
+      
+      // Give the 100% progress bar a split second to visually complete before switching routes
+      setTimeout(() => navigate("/dashboard"), 600);
 
     } catch (err) {
       console.error(err);
-      setError("Could not reach the analysis engine. Please make sure the backend is running.");
-    } finally {
+      setError("Analysis failed. Please make sure the backend is running and the file is readable.");
       setLoading(false);
     }
   };
@@ -226,7 +270,7 @@ export default function UploadPage() {
                   >
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx"
+                      accept=".pdf,.doc,.docx,.txt"
                       onChange={handleFileChange}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                       disabled={loading}
@@ -267,7 +311,7 @@ export default function UploadPage() {
                             Drop your resume here
                           </p>
                           <p className="text-[var(--text-muted)] text-xs">
-                            PDF or DOCX — up to 5MB
+                            PDF, DOCX, or TXT — up to 5MB
                           </p>
                         </motion.div>
                       )}
@@ -275,28 +319,56 @@ export default function UploadPage() {
                   </div>
                 </div>
 
-                {/* Submit Button */}
-                <motion.button
-                  type="submit"
-                  disabled={loading}
-                  whileHover={!loading ? { scale: 1.01 } : {}}
-                  whileTap={!loading ? { scale: 0.98 } : {}}
-                  id="submit-analysis"
-                  className={`w-full py-4 text-sm font-semibold tracking-wide rounded-xl flex items-center justify-center gap-2.5 transition-all duration-300 ${
-                    loading
-                      ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)] cursor-wait border border-[var(--border-subtle)]'
-                      : 'btn-warm w-full'
-                  }`}
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" />
-                      Analyzing your resume...
-                    </>
-                  ) : (
-                    'Begin Analysis'
-                  )}
-                </motion.button>
+                {/* Submit Button & Progress */}
+                <div className="space-y-4">
+                  <motion.button
+                    type="submit"
+                    disabled={loading || !file}
+                    whileHover={!(loading || !file) ? { scale: 1.01 } : {}}
+                    whileTap={!(loading || !file) ? { scale: 0.98 } : {}}
+                    id="submit-analysis"
+                    className={`w-full py-4 text-sm font-semibold tracking-wide rounded-xl flex items-center justify-center gap-2.5 transition-all duration-300 ${
+                      loading || !file
+                        ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                        : 'btn-warm w-full'
+                    } ${loading ? 'cursor-wait' : !file ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Begin Analysis'
+                    )}
+                  </motion.button>
+
+                  <AnimatePresence>
+                    {loading && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pt-2 pb-1">
+                          <div className="flex justify-between text-xs font-medium text-[var(--text-secondary)] mb-2">
+                            <span>{uploadStatus}</span>
+                            <span>{Math.round(uploadProgress)}%</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
+                            <motion.div 
+                              className="h-full bg-[var(--accent-warm)] rounded-full"
+                              initial={{ width: '0%' }}
+                              animate={{ width: `${uploadProgress}%` }}
+                              transition={{ duration: 0.3 }}
+                            />
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               </form>
             </div>
           </motion.div>

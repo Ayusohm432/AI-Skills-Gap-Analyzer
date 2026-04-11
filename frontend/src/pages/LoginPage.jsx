@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, Loader2, Mail, Lock } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import InteractiveBackground from '../components/InteractiveBackground';
 import Navbar from '../components/Navbar';
 import PageTransition from '../components/PageTransition';
@@ -21,6 +22,10 @@ function validate(email, password) {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login } = useAuth();
+
+  const from = location.state?.from?.pathname || '/dashboard';
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
@@ -49,24 +54,14 @@ export default function LoginPage() {
     setApiError('');
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.email, password: form.password }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('authToken', data.token ?? '');
-        navigate('/dashboard');
-      } else if (response.status === 401) {
+      await login(form.email, form.password);
+      navigate(from, { replace: true });
+    } catch (err) {
+      if (err.message.includes('credentials')) {
         setApiError('Invalid email or password. Please try again.');
       } else {
         setApiError('Something went wrong. Please try again later.');
       }
-    } catch {
-      // Backend not available — simulate a demo login
-      navigate('/dashboard');
     } finally {
       setIsLoading(false);
     }

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, Loader2, Mail, Lock, User } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import InteractiveBackground from '../components/InteractiveBackground';
 import Navbar from '../components/Navbar';
 import PageTransition from '../components/PageTransition';
@@ -36,6 +37,7 @@ function validate(name, email, password, confirmPassword) {
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const { register } = useAuth();
 
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
   const [errors, setErrors] = useState({});
@@ -68,24 +70,14 @@ export default function RegisterPage() {
     setApiError('');
 
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('authToken', data.token ?? '');
-        navigate('/dashboard');
-      } else if (response.status === 409) {
-        setApiError('An account with this email already exists. Try logging in instead.');
+      await register(form.name, form.email, form.password);
+      navigate('/dashboard');
+    } catch (err) {
+      if (err.message.includes('exists') || err.message.includes('Registration')) {
+        setApiError('An account with this email already exists.');
       } else {
         setApiError('Something went wrong. Please try again later.');
       }
-    } catch {
-      // Backend not available — simulate demo registration
-      navigate('/dashboard');
     } finally {
       setIsLoading(false);
     }
