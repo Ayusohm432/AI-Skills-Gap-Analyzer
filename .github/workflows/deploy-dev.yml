@@ -47,3 +47,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./frontend/dist
           destination_dir: dev
+          keep_files: true
