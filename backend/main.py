@@ -65,11 +65,23 @@ async def startup_event():
     # The record should have an 'expires_at' field
     await refresh_tokens_collection.create_index("expires_at", expireAfterSeconds=0)
     
+from urllib.parse import urlparse
+
 # Determine allowed origins dynamically
-allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-production_url = os.getenv("FRONTEND_URL")
-if production_url:
-    allowed_origins.append(production_url)
+base_origins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
+allowed_origins = list(base_origins)
+
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    for url in frontend_url.split(","):
+        parsed = urlparse(url.strip())
+        if parsed.scheme and parsed.netloc:
+            # Extract only the origin (scheme + netloc), as CORS must not include paths
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            allowed_origins.append(origin)
+
+# Ensure uniqueness
+allowed_origins = list(set(allowed_origins))
 
 app.add_middleware(
     CORSMiddleware,
