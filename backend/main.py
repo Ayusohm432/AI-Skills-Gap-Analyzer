@@ -49,21 +49,25 @@ def startup_event():
     thread = threading.Thread(target=keep_alive, daemon=True)
     thread.start()
     
-# Determine allowed origins dynamically
-allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-production_url = os.getenv("FRONTEND_URL")
+# Initialize allowed origins
+allowed_origins = [
+    "http://localhost:5173", 
+    "http://127.0.0.1:5173",
+    "https://ayusohm432.github.io" # Explicitly include user's domain
+]
 
+production_url = os.getenv("FRONTEND_URL")
 if production_url:
     # Remove any trailing slash and path to get just the protocol://domain
     parsed = urlparse(production_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     if origin not in allowed_origins:
         allowed_origins.append(origin)
-    # Also add the exact string just in case
+    # Also add the raw production_url just in case
     if production_url not in allowed_origins:
         allowed_origins.append(production_url)
 
-print(f"CORS: Allowed Origins: {allowed_origins}")
+print(f"DEBUG: CORS Allowed Origins: {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -153,6 +157,7 @@ async def analyze_resume(
     }
     
     result = await analyses_collection.insert_one(document)
+    print(f"DEBUG: Analysis completed. Result ID: {result.inserted_id}. Readiness: {readiness_score}%")
 
     return AnalysisResponse(
         job_id=str(result.inserted_id),

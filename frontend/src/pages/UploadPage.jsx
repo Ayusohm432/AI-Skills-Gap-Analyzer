@@ -67,16 +67,30 @@ export default function UploadPage() {
     try {
       // Automatically use localhost in dev mode, but use the environment variable in production
       const apiUrl = import.meta.env.DEV ? "http://127.0.0.1:8000" : (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000");
+      console.log(`[DEBUG] Initiating request to: ${apiUrl}/api/v1/analyze/resume`);
+      
       const response = await fetch(`${apiUrl}/api/v1/analyze/resume`, {
         method: "POST",
         body: formData,
       });
 
+      console.log(`[DEBUG] Response Status: ${response.status} ${response.statusText}`);
+      
       if (!response.ok) {
-        throw new Error(`Server responded with status: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`[DEBUG] Error Response Body: ${errorText}`);
+        throw new Error(`Server responded with status: ${response.status}. Details: ${errorText}`);
       }
 
-      const data = await response.json();
+      const responseText = await response.text();
+      console.log(`[DEBUG] Raw Response Body: ${responseText.substring(0, 100)}...`);
+
+      if (!responseText || responseText.trim() === "") {
+        throw new Error("Received an empty response from the server.");
+      }
+
+      const data = JSON.parse(responseText);
+      console.log("[DEBUG] Successfully parsed JSON data.");
 
       // Store data in localStorage specifically for the demo dashboard to pick up
       localStorage.setItem("analysisResult", JSON.stringify(data));
@@ -84,8 +98,12 @@ export default function UploadPage() {
       navigate("/dashboard");
 
     } catch (err) {
-      console.error(err);
-      setError("Failed to connect to the analysis engine. Is the backend running?");
+      console.error("[DEBUG] Full error object:", err);
+      // Detailed error messaging for the user
+      const userFriendlyMsg = err.message.includes("Failed to fetch") 
+        ? "CORS Blocked or Network Error. Check if backend allows this origin." 
+        : err.message;
+      setError(userFriendlyMsg);
     } finally {
       setLoading(false);
     }

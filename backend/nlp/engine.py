@@ -6,7 +6,19 @@ import io
 try:
     nlp = spacy.load("en_core_web_sm")
 except Exception:
-    pass # Needs to be python -m spacy download en_core_web_sm during docker image build
+    # Fallback to a dummy object if the model isn't downloaded/installed
+    class DummyNLP:
+        def __call__(self, text):
+            # Simple space-based tokenization fallback
+            class Token:
+                def __init__(self, t): self.text = t
+            class Doc:
+                def __init__(self, t): 
+                    self.tokens = [Token(x) for x in t.split()]
+                    self.noun_chunks = []
+                def __iter__(self): return iter(self.tokens)
+            return Doc(text)
+    nlp = DummyNLP()
 
 KNOWN_SKILLS = {
     "python", "java", "c++", "javascript", "typescript", "react", "angular", "vue", "next.js", "node.js",
