@@ -9,3 +9,4 @@ pydantic
 pydantic-settings
 gunicorn
 python-dotenv
+sentence-transformers>=2.2.0
