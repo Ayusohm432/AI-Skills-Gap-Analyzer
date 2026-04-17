@@ -1,5 +1,5 @@
 fastapi
-uvicorn[standard]
+uvicorn
 motor
 python-multipart
 spacy>=3.8.0,<3.9.0
@@ -9,3 +9,9 @@ pydantic
 pydantic-settings
 gunicorn
 python-dotenv
+bcrypt
+python-jose[cryptography]
+passlib[bcrypt]
+slowapi
+email-validator
+requests

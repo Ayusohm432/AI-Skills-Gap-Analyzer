@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -7,13 +7,17 @@ import json
 import os
 import threading
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-# Load environment variables (useful for local development runs without docker)
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# Load environment variables
 load_dotenv()
 
-from database import analyses_collection, jobs_collection
+from database import analyses_collection, jobs_collection, users_collection, refresh_tokens_collection
 from nlp.engine import (
     extract_text_from_pdf, 
     extract_skills_from_text, 
@@ -21,8 +25,14 @@ from nlp.engine import (
     generate_roadmap, 
     generate_interview_questions
 )
+from security import get_current_user
+from routes import auth, user
 
+# Initialize Limiter
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="AI Skill Gap Analyzer API", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 def keep_alive():
     url = os.environ.get("RENDER_EXTERNAL_URL")
@@ -42,17 +52,36 @@ def keep_alive():
         time.sleep(600) 
 
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     # This runs the keep_alive function in a background thread 
     # so it doesn't block your FastAPI server from handling real requests.
     thread = threading.Thread(target=keep_alive, daemon=True)
     thread.start()
     
+    # Create unique index for email
+    await users_collection.create_index("email", unique=True)
+    
+    # Create TTL index for refresh tokens (automatic cleanup after expiry)
+    # The record should have an 'expires_at' field
+    await refresh_tokens_collection.create_index("expires_at", expireAfterSeconds=0)
+    
+from urllib.parse import urlparse
+
 # Determine allowed origins dynamically
-allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-production_url = os.getenv("FRONTEND_URL")
-if production_url:
-    allowed_origins.append(production_url)
+base_origins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
+allowed_origins = list(base_origins)
+
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    for url in frontend_url.split(","):
+        parsed = urlparse(url.strip())
+        if parsed.scheme and parsed.netloc:
+            # Extract only the origin (scheme + netloc), as CORS must not include paths
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            allowed_origins.append(origin)
+
+# Ensure uniqueness
+allowed_origins = list(set(allowed_origins))
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +90,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register Routers
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(user.router, prefix="/api/v1/user", tags=["User Profile"])
 
 class AnalysisResponse(BaseModel):
     job_id: str
@@ -79,7 +112,8 @@ def health_check():
 @app.post("/api/v1/analyze/resume", response_model=AnalysisResponse)
 async def analyze_resume(
     role: str = Form("Auto Detect"),
-    resume: UploadFile = File(...)
+    resume: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Endpoint that accepts a file upload, parses text, and runs NLP analysis to find skill gaps.
@@ -131,14 +165,14 @@ async def analyze_resume(
 
     # 5. Database Storage (MongoDB)
     document = {
-        "user_id": "anonymous",
+        "user_id": current_user["id"],
         "target_role": target_role,
         "readiness_score": readiness_score,
         "identified_skills": identified_skills,
         "missing_skills": missing_skills,
         "roadmap": roadmap,
         "interview_questions": interview_qs,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.now(timezone.utc)
     }
     
     result = await analyses_collection.insert_one(document)

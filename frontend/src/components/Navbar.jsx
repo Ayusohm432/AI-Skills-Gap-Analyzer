@@ -26,6 +26,10 @@ export default function Navbar() {
     { to: '/dashboard', label: 'Dashboard' },
   ];
 
+  if (isAuthenticated) {
+    navLinks.push({ to: '/profile', label: 'Profile' });
+  }
+
   const isActive = (path) => location.pathname === path;
 
   return (
@@ -43,15 +47,11 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-16 lg:h-18">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 group" id="nav-logo">
-            <div className="relative w-8 h-8 rounded-lg overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-br from-[#e8a849] to-[#d96b5d] opacity-90" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 2L14 6V10L8 14L2 10V6L8 2Z" stroke="white" strokeWidth="1.5" fill="none" />
-                  <circle cx="8" cy="8" r="2" fill="white" />
-                </svg>
-              </div>
-            </div>
+            <img 
+              src={`${import.meta.env.BASE_URL}logo.svg`} 
+              alt="SkillGap" 
+              className="w-10 h-10 object-contain"
+            />
             <span className="text-[var(--text-primary)] font-semibold text-lg tracking-tight">
               Skill<span className="text-[var(--accent-warm)]">Gap</span>
             </span>
@@ -91,7 +91,7 @@ export default function Navbar() {
                   {user?.name || user?.email?.split('@')[0] || 'User'}
                 </span>
                 <button
-                  onClick={() => { logout(); navigate('/'); }}
+                  onClick={() => { logout(); navigate('/login'); }}
                   className="text-sm font-medium px-4 py-2 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-all flex items-center gap-2 group"
                 >
                   <LogOut size={14} className="group-hover:text-[var(--accent-coral)] transition-colors" />
