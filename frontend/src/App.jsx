@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
+import ProfilePage from './pages/ProfilePage';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -27,15 +28,23 @@ function AnimatedRoutes() {
             <DashboardPage />
           </ProtectedRoute>
         } />
+        <Route path="/profile" element={
+          <ProtectedRoute>
+            <ProfilePage />
+          </ProtectedRoute>
+        } />
       </Routes>
     </AnimatePresence>
   );
 }
 
 function App() {
+  // Normalize basename: remove trailing slash if present to be consistent with router matching
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
+  
   return (
     <AuthProvider>
-      <Router>
+      <Router basename={basename}>
         <AnimatedRoutes />
       </Router>
     </AuthProvider>

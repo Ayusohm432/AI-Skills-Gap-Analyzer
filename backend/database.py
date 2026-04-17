@@ -15,6 +15,7 @@ users_collection = db["users"]
 resumes_collection = db["resumes"]
 analyses_collection = db["analyses"]
 jobs_collection = db["job_descriptions"]
+refresh_tokens_collection = db["refresh_tokens"]
 
 async def get_db():
     """Dependency to pass the database instance around."""

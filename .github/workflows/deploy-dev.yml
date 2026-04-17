@@ -1,0 +1,50 @@
+name: Deploy Staging (Development)
+
+on:
+  push:
+    branches:
+      - development
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-backend-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Staging Deploy
+        run: curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_DEV }}"
+
+  deploy-frontend-staging:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL_DEV }}
+          VITE_BASE_PATH: /AI-Skills-Gap-Analyzer/dev/
+        run: |
+          npm run build
+          cp dist/index.html dist/404.html
+
+      - name: Deploy to GitHub Pages (Dev Subfolder)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./frontend/dist
+          destination_dir: dev
+          keep_files: true

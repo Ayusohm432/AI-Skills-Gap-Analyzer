@@ -6,6 +6,7 @@ import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import PageTransition from "../components/PageTransition";
+import { secureFetch } from "../api/base";
 
 export default function UploadPage() {
   const [file, setFile] = useState(null);
@@ -29,8 +30,7 @@ export default function UploadPage() {
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const apiUrl = import.meta.env.DEV ? "http://127.0.0.1:8000" : (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000");
-        const res = await fetch(`${apiUrl}/api/v1/jobs/roles`);
+        const res = await secureFetch('/api/v1/jobs/roles');
         if (res.ok) {
           const data = await res.json();
           if (data.roles && data.roles.length > 0) {
@@ -126,11 +126,9 @@ export default function UploadPage() {
         if (progress > 75) setUploadStatus("AI NLP matching against role requirements...");
       }, 500);
 
-      const apiUrl = import.meta.env.DEV ? "http://127.0.0.1:8000" : (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000");
-      const response = await fetch(`${apiUrl}/api/v1/analyze/resume`, {
+      const response = await secureFetch('/api/v1/analyze/resume', {
         method: "POST",
         body: formData,
-        // credentials: "include" // We use fetch directly here. If using secureFetch later, swap over.
       });
 
       clearInterval(progressInterval);
