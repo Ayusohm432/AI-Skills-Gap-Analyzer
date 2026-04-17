@@ -1,7 +1,8 @@
 services:
   - type: web
-    name: ai-skill-gap-api
+    name: ai-skills-staging
     runtime: docker
+    branch: development
     # Points to the Dockerfile inside your backend folder
     dockerContext: backend
     dockerfilePath: backend/Dockerfile
