@@ -43,4 +43,3 @@ pnpm-debug.log*
 .env.production.local
 IMPLEMENTATION_PLAN_WITH_ML.pdf
 AI-Skills-Gap-Analyzer.code-workspace
-cross_developer_dependency_chart.html
