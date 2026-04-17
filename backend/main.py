@@ -20,7 +20,8 @@ load_dotenv()
 from database import analyses_collection, jobs_collection, users_collection, refresh_tokens_collection
 from nlp.engine import (
     extract_text_from_pdf, 
-    extract_skills_from_text, 
+    extract_skills_from_text,
+    extract_skills_combined,
     match_role_and_skills, 
     generate_roadmap, 
     generate_interview_questions
@@ -100,6 +101,7 @@ class AnalysisResponse(BaseModel):
     status: str
     target_role: str
     skills_detected: List[str]
+    skill_confidences: dict = {}   # {skill_name: confidence_score}
     missing_skills: List[str]
     readiness_score: float
     roadmap: list
@@ -130,8 +132,10 @@ async def analyze_resume(
     file_bytes = await resume.read()
     raw_text = extract_text_from_pdf(file_bytes)
 
-    # 2. AI NLP Extraction
-    found_skills = extract_skills_from_text(raw_text)
+    # 2. AI NLP Extraction (Phase 2: keyword + semantic combined)
+    combined_results = extract_skills_combined(raw_text)
+    found_skills = [r["skill"] for r in combined_results]
+    skill_confidences = {r["skill"]: r["confidence"] for r in combined_results}
     
     # 3. Role Comparison Logic
     # Fetch roles dynamically from the MongoDB jobs_collection
@@ -182,6 +186,7 @@ async def analyze_resume(
         status="completed",
         target_role=target_role,
         skills_detected=identified_skills,
+        skill_confidences=skill_confidences,
         missing_skills=missing_skills,
         readiness_score=readiness_score,
         roadmap=roadmap,
