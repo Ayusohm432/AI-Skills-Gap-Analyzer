@@ -22,11 +22,23 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# ── Allow Windows developers to point pytesseract at their local install ──────
+# Set TESSERACT_CMD in your .env file (see .env.example).
+# In Docker / Linux this is left unset — Tesseract is on PATH automatically.
+_tesseract_cmd = os.getenv("TESSERACT_CMD")
+if _tesseract_cmd:
+    try:
+        import pytesseract
+        pytesseract.pytesseract.tesseract_cmd = _tesseract_cmd
+    except ImportError:
+        pass  # pytesseract not installed yet; will fail gracefully at call-time
 
 # ── Threshold below which a PDF page is assumed to be image-only ──────────────
 SCANNED_CHAR_THRESHOLD: int = 100

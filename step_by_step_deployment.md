@@ -63,31 +63,24 @@ Your application needs a live, universally accessible database server for produc
 
 ## Step 2: Deploy the Backend API (Render.com)
 
-We will deploy our FastAPI python code to Render.com.
+We will use **Render Blueprints** to deploy the backend. This uses the `render.yaml` file to automatically configure the service as a **Docker** environment, ensuring Tesseract OCR is installed.
 
-1. **Sign Up:** Go to [Render.com](https://render.com/) and create a free account linked with your GitHub.
-2. **Create Service:** Click the **"New +"** button in the top right and select **"Web Service"**.
-3. **Connect Repository:** 
-   - Choose **"Build and deploy from a Git repository"**.
-   - Click "Next", authorize GitHub if prompted, and select your `ai-skill-gap` repository.
-4. **Configure the Web Service:** Fill in the following exact details:
-   - **Name:** `ai-skill-gap-api` (or any unique name).
-   - **Region:** Choose the region closest to your MongoDB database (e.g., Singapore or US East).
-   - **Branch:** `main`
-   - **Root Directory:** Type exactly `backend` (This tells Render our Python code is in the `/backend` folder).
-   - **Runtime:** `Python 3`
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker`
-   - **Instance Type:** Select the **Free** tier (0.1 CPU, 512 MB RAM).
-5. **Add Environment Variables:**
-   - Scroll down to the **"Environment Variables"** block.
-   - Click "Add Environment Variable".
-   - **Key 1:** `MONGO_URL`
-   - **Value 1:** `[Paste your full MongoDB connection string from your notepad]`
-   - *(Optional but recommended)* **Key 2:** `PYTHON_VERSION` | **Value 2:** `3.10.0`
-6. **Deploy:** Click **"Create Web Service"**.
-7. **Monitor the Build:** Render will now download your code, install dependencies, and start the server. You can watch the console logs. It will take roughly 3-5 minutes.
-8. **Get your API URL:** Once deployed, you will see a green "Live" badge. In the top left, under your service name, copy your backend URL (e.g., `https://ai-skill-gap-api-123.onrender.com`). **Save this to your notepad.**
+1. **Push your code:** Make sure you have pushed the latest code (including `render.yaml` and the `backend/Dockerfile`) to GitHub.
+2. **Open Blueprints:** Go to your [Render Dashboard](https://dashboard.render.com/) and click on **"Blueprints"** in the top navigation bar.
+3. **Connect Blueprint:** 
+   - Click **"New Blueprint Instance"**.
+   - Connect your `ai-skill-gap` repository.
+4. **Configure Instance:**
+   - **Service Group Name:** `ai-skill-gap` (or any name).
+   - Render will detect the `render.yaml` file and show the `ai-skill-gap-api` service.
+   - Click **"Update Existing Resources"** or **"Deploy"**.
+5. **Set Environment Variables:**
+   - Find your new `ai-skill-gap-api` service in the dashboard.
+   - Go to **Environment**.
+   - You will see the `SECRET_KEY` was generated for you. 
+   - Manually add `MONGO_URL` and `FRONTEND_URL` as described in Step 4.
+6. **Deploy:** Render will build your Docker image (installs Tesseract + Python deps). This takes roughly 5-8 minutes on first deploy.
+7. **Get your API URL:** Once deployed, copy your backend URL from the service dashboard.
 
 ---
 
