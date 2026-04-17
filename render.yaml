@@ -4,7 +4,7 @@ services:
     runtime: docker
     # Points to the Dockerfile inside your backend folder
     dockerContext: backend
-    dockerfilePath: Dockerfile
+    dockerfilePath: backend/Dockerfile
     plan: free
     envVars:
       - key: MONGO_URL
