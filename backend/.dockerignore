@@ -1,0 +1,18 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Local environment / secrets
+.env
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore

@@ -1,7 +1,8 @@
 import spacy
-import pdfplumber
 import re
 import io
+
+from nlp.pdf_extractor import extract_text as _extract_pdf_text
 
 try:
     nlp = spacy.load("en_core_web_sm")
@@ -18,15 +19,20 @@ KNOWN_SKILLS = {
     "mlops", "feature engineering", "c#", ".net", "rust", "go", "ruby", "php"
 }
 
-def extract_text_from_pdf(file_bytes):
-    text = ""
-    # We use io.BytesIO to simulate a file for pdfplumber because FastAPI UploadFile gives bytes
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-    return text
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """
+    Public wrapper used by main.py.
+
+    Delegates to the new pdf_extractor pipeline:
+      - PyMuPDF (fitz) for text-layer PDFs
+      - pytesseract OCR fallback for scanned/image-only PDFs
+      - text cleaning (whitespace normalisation, header/footer stripping)
+
+    Returns cleaned text as a plain string to keep the rest of the
+    engine unchanged.
+    """
+    result = _extract_pdf_text(file_bytes)
+    return result["text"]
 
 def extract_skills_from_text(text):
     text = text.lower()

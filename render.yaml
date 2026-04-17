@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ai-skill-gap-api
+    runtime: docker
+    # Points to the Dockerfile inside your backend folder
+    dockerContext: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    envVars:
+      - key: MONGO_URL
+        sync: false # You will set this in the Render Dashboard
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 15
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: 7
+      - key: FRONTEND_URL
+        sync: false # You will set this in the Render Dashboard
+      - key: PORT
+        value: 8000
