@@ -1,0 +1,206 @@
+{
+    "Software Engineer": {
+        "demand_multiplier": 1.5,
+        "openings": 34
+    },
+    "Data Scientist": {
+        "demand_multiplier": 1.35,
+        "openings": 27
+    },
+    "Technical Lead": {
+        "demand_multiplier": 1.05,
+        "openings": 13
+    },
+    "Solutions Architect": {
+        "demand_multiplier": 1.05,
+        "openings": 13
+    },
+    "Scooter Mechanic": {
+        "demand_multiplier": 1.01,
+        "openings": 11
+    },
+    "Project Manager": {
+        "demand_multiplier": 0.99,
+        "openings": 10
+    },
+    "Business Analyst": {
+        "demand_multiplier": 0.99,
+        "openings": 10
+    },
+    "Engineering Manager": {
+        "demand_multiplier": 0.97,
+        "openings": 9
+    },
+    "Lead Engineer": {
+        "demand_multiplier": 0.97,
+        "openings": 9
+    },
+    "Product Manager": {
+        "demand_multiplier": 0.97,
+        "openings": 9
+    },
+    "Frontend Engineer": {
+        "demand_multiplier": 0.97,
+        "openings": 9
+    },
+    "System Administrator": {
+        "demand_multiplier": 0.97,
+        "openings": 9
+    },
+    "Qa Engineer": {
+        "demand_multiplier": 0.95,
+        "openings": 8
+    },
+    "DevOps Engineer": {
+        "demand_multiplier": 0.95,
+        "openings": 8
+    },
+    "Full Stack Engineer": {
+        "demand_multiplier": 0.95,
+        "openings": 8
+    },
+    "Ux Designer": {
+        "demand_multiplier": 0.95,
+        "openings": 8
+    },
+    "Security Engineer": {
+        "demand_multiplier": 0.93,
+        "openings": 7
+    },
+    "Backend Engineer": {
+        "demand_multiplier": 0.91,
+        "openings": 6
+    },
+    "Data Analyst": {
+        "demand_multiplier": 0.88,
+        "openings": 5
+    },
+    "Account Manager": {
+        "demand_multiplier": 0.84,
+        "openings": 3
+    },
+    "Fleet Operations Driver": {
+        "demand_multiplier": 0.84,
+        "openings": 3
+    },
+    "Technical Account Manager - Dach": {
+        "demand_multiplier": 0.82,
+        "openings": 2
+    },
+    "Senior Android Engineer": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Staff Data Platform Engineer (F/M/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Senior Solutions Architect": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Marketing/Sales Manager (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Seo Account Manager:In (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Talent Acquisition Manager:In": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Strategic Procurement Manager (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Marketplace & E-Commerce Manager (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Social Media & Community Manager:In (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Regional Restaurant Marketing Manager (North And East)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Senior Finanzbuchhalter:In (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Analytics Lead, Operations": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Forward Deployed Engineer (M/F/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Werkstudent:In Performance Marketing / Ppc (Meta Ads & Google Ads)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "** Sap Consultant - Schwerpunkt Security-Beratung **": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Praktikum Social Media Content": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "On-Site Support Specialist (M/W/D) - 1389": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Werkstudent Standortanalyse & Pps-Optimierung Au\u00dfenwerbung (M/W/D) (Hybrid \u00b7 Datenbasiert \u00b7 Regelm\u00e4\u00dfige Feedbackmeetings Im B\u00fcro)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Sachbearbeiter (M/W/D) Abrechnung/Faktura Schadenmanagement Als Elternzeitvertretung (Befristet)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Content Producer, Mit Fokus Auf Video (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Fachkraft F\u00fcr Lebensmitteltechnik (Mitarbeiter Im Prozessbereich) (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Projektingenieur Wasserver- Und Entsorgung (M/W/D) Mit F\u00fchrungsverantwortung In M\u00fcnchen": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Let'S Connect, Open Application": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Werkstudent Webentwicklung (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Post-Onboarding Success Specialist": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "Strategic Hr Business Partner (F/M/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "(Junior) Testautomatisierer (M/W/D) #Lowcode": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "(Junior) Media Buyer Influencer Marketing (M/W/D)": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    },
+    "(Junior) Softwareentwickler (M/W/D) #Lowcode": {
+        "demand_multiplier": 0.8,
+        "openings": 1
+    }
+}
