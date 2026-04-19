@@ -8,6 +8,7 @@ pymupdf>=1.24.0
 pytesseract>=0.3.10
 Pillow>=10.3.0
 pdfplumber
+python-docx>=1.1.0
 pydantic
 pydantic-settings
 gunicorn
