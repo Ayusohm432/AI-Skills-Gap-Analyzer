@@ -1,12 +1,11 @@
 import spacy
-import pdfplumber
 import re
-import io
 import logging
 from typing import Any
 
 from nlp.config import NLPConfig
 from nlp.semantic import extract_skills_semantic
+from nlp.pdf_processor import extract_text_from_pdf  # noqa: F401 – re-exported for main.py
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +24,8 @@ KNOWN_SKILLS = {
     "mlops", "feature engineering", "c#", ".net", "rust", "go", "ruby", "php"
 }
 
-def extract_text_from_pdf(file_bytes):
-    text = ""
-    # We use io.BytesIO to simulate a file for pdfplumber because FastAPI UploadFile gives bytes
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-    return text
+# extract_text_from_pdf is imported from nlp.pdf_processor and re-exported above.
+# The function signature is: extract_text_from_pdf(file_bytes: bytes) -> str
 
 def extract_skills_from_text(text):
     text = text.lower()
