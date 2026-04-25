@@ -17,6 +17,9 @@ analyses_collection = db["analyses"]
 jobs_collection = db["job_descriptions"]
 refresh_tokens_collection = db["refresh_tokens"]
 
+# Background job state tracking (pending → processing → completed/failed)
+analysis_jobs_collection = db["analysis_jobs"]
+
 async def get_db():
     """Dependency to pass the database instance around."""
     return db

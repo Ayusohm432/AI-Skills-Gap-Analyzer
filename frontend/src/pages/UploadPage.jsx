@@ -113,45 +113,85 @@ export default function UploadPage() {
     formData.append("role", finalRole);
 
     try {
-      // Simulate fake upload progress while waiting since fetch doesn't support native upload progress
-      // and backend processing actually takes the most time.
-      let progress = 0;
-      const progressInterval = setInterval(() => {
-        progress += Math.random() * 15;
-        if (progress > 85) progress = 85; // Cap at 85% until backend resolves
-        setUploadProgress(progress);
-        
-        if (progress > 20) setUploadStatus("Uploading file natively...");
-        if (progress > 50) setUploadStatus("Extracting raw text...");
-        if (progress > 75) setUploadStatus("AI NLP matching against role requirements...");
-      }, 500);
+      // ── Step 1: Submit job (expect 202 + job_id) ──────────────────
+      setUploadProgress(10);
+      setUploadStatus("Uploading resume...");
 
-      const response = await secureFetch('/api/v1/analyze/resume', {
+      const submitRes = await secureFetch('/api/v1/analyze/resume', {
         method: "POST",
         body: formData,
       });
 
-      clearInterval(progressInterval);
-
-      if (!response.ok) {
-        throw new Error(`Server responded with status: ${response.status}`);
+      if (!submitRes.ok) {
+        const errData = await submitRes.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error: ${submitRes.status}`);
       }
 
+      const { job_id } = await submitRes.json();
+
+      setUploadProgress(25);
+      setUploadStatus("Analysis queued — extracting text...");
+
+      // ── Step 2: Poll every 2 s until completed / failed ───────────
+      const statusMessages = [
+        "Extracting text from resume...",
+        "Running NLP skill extraction...",
+        "Matching against role requirements...",
+        "Predicting missing skills...",
+        "Generating learning roadmap...",
+        "Finalizing analysis...",
+      ];
+      let msgIdx = 0;
+      let pollProgress = 30;
+
+      const result = await new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const pollRes = await secureFetch(`/api/v1/jobs/${job_id}`);
+            if (!pollRes.ok) {
+              clearInterval(interval);
+              reject(new Error(`Poll error: ${pollRes.status}`));
+              return;
+            }
+
+            const jobData = await pollRes.json();
+
+            // Advance progress + message
+            if (pollProgress < 90) {
+              pollProgress += 10;
+              setUploadProgress(pollProgress);
+            }
+            setUploadStatus(statusMessages[msgIdx % statusMessages.length]);
+            msgIdx++;
+
+            if (jobData.status === "completed") {
+              clearInterval(interval);
+              resolve(jobData.result);
+            } else if (jobData.status === "failed") {
+              clearInterval(interval);
+              reject(new Error(jobData.error || "Analysis failed on the server."));
+            }
+            // "pending" / "processing" → keep polling
+          } catch (pollErr) {
+            clearInterval(interval);
+            reject(pollErr);
+          }
+        }, 2000);
+      });
+
+      // ── Step 3: Save result and navigate ─────────────────────────
       setUploadProgress(100);
       setUploadStatus("Analysis Complete!");
-
-      const data = await response.json();
-      localStorage.setItem("analysisResult", JSON.stringify(data));
-      
-      // Give the 100% progress bar a split second to visually complete before switching routes
+      localStorage.setItem("analysisResult", JSON.stringify(result));
       setTimeout(() => navigate("/dashboard"), 600);
 
     } catch (err) {
       console.error(err);
-      setError("Analysis failed. Please make sure the backend is running and the file is readable.");
+      setError(err.message || "Analysis failed. Please make sure the backend is running and the file is readable.");
       setLoading(false);
     }
   };
+
 
   return (
     <PageTransition>

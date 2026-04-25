@@ -1,7 +1,13 @@
 import spacy
-import pdfplumber
 import re
-import io
+import logging
+from typing import Any
+
+from nlp.config import NLPConfig
+from nlp.semantic import extract_skills_semantic
+from nlp.pdf_processor import extract_text_from_pdf  # noqa: F401 – re-exported for main.py
+
+logger = logging.getLogger(__name__)
 
 try:
     nlp = spacy.load("en_core_web_sm")
@@ -18,15 +24,8 @@ KNOWN_SKILLS = {
     "mlops", "feature engineering", "c#", ".net", "rust", "go", "ruby", "php"
 }
 
-def extract_text_from_pdf(file_bytes):
-    text = ""
-    # We use io.BytesIO to simulate a file for pdfplumber because FastAPI UploadFile gives bytes
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-    return text
+# extract_text_from_pdf is imported from nlp.pdf_processor and re-exported above.
+# The function signature is: extract_text_from_pdf(file_bytes: bytes) -> str
 
 def extract_skills_from_text(text):
     text = text.lower()
@@ -112,3 +111,80 @@ def generate_interview_questions(missing_skills):
     if not questions:
         questions.append("Can you walk us through your most complex project, including the architecture and challenges?")
     return questions
+
+
+def _merge_results(
+    keyword_skills: list[str],
+    semantic_results: list[dict[str, Any]],
+    strategy: str = "union",
+) -> list[dict[str, Any]]:
+    """
+    Merge Phase 1 keyword matches with Phase 2 semantic results.
+
+    Strategies:
+      - "union": Combine both, keyword hits get confidence=1.0
+      - "semantic_only": Only return semantic results
+      - "keyword_only": Only return keyword results (with confidence=1.0)
+
+    Returns list of {"skill": str, "confidence": float, "category": str}
+    """
+    if strategy == "keyword_only":
+        return [
+            {"skill": s, "confidence": 1.0, "category": "keyword_match"}
+            for s in keyword_skills
+        ]
+
+    if strategy == "semantic_only":
+        return semantic_results
+
+    # Default: "union" — merge both
+    merged: dict[str, dict[str, Any]] = {}
+
+    # Keyword results as baseline (confidence = 1.0)
+    for skill_name in keyword_skills:
+        key = skill_name.lower()
+        merged[key] = {
+            "skill": skill_name,
+            "confidence": 1.0,
+            "category": "keyword_match",
+        }
+
+    # Layer semantic results on top — add new discoveries,
+    # but don't overwrite keyword hits (they already have confidence=1.0)
+    for result in semantic_results:
+        key = result["skill"].lower()
+        if key not in merged:
+            merged[key] = result
+
+    return sorted(merged.values(), key=lambda x: x["confidence"], reverse=True)
+
+
+def extract_skills_combined(
+    text: str,
+    config: NLPConfig | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Phase 2 skill extraction: combines keyword matching with semantic similarity.
+
+    Returns list of dicts with keys:
+      - "skill": str — skill name
+      - "confidence": float — confidence score (1.0 for keyword matches)
+      - "category": str — skill category
+    """
+    config = config or NLPConfig()
+
+    # Phase 1: keyword matching (always runs as baseline)
+    keyword_skills = extract_skills_from_text(text)
+    logger.info("Keyword extraction found %d skills", len(keyword_skills))
+
+    # Phase 2: semantic matching
+    semantic_results = []
+    if config.USE_SEMANTIC_EXTRACTION:
+        try:
+            semantic_results = extract_skills_semantic(text, config)
+            logger.info("Semantic extraction found %d skills", len(semantic_results))
+        except Exception as e:
+            logger.error("Semantic extraction failed, falling back to keyword-only: %s", e)
+
+    # Merge results
+    return _merge_results(keyword_skills, semantic_results, config.MERGE_STRATEGY)

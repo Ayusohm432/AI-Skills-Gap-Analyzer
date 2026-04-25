@@ -115,3 +115,37 @@ class UserUpdate(BaseModel):
             }
         }
     )
+
+
+# ── Job / Background-task models ──────────────────────────────────────────────
+
+class AnalysisResult(BaseModel):
+    """Full analysis payload stored inside a completed job document."""
+    target_role:        str
+    skills_detected:    List[str]
+    skill_confidences:  dict = {}
+    missing_skills:     List[str]
+    readiness_score:    float
+    roadmap:            list
+    interview_questions: List[str]
+    ml_role_source:     Optional[str] = None
+    ml_missing_source:  Optional[str] = None
+
+
+class JobAcceptedResponse(BaseModel):
+    """Returned immediately (HTTP 202) when a resume analysis job is submitted."""
+    job_id:  str
+    status:  str = "pending"
+    message: str = "Analysis job queued. Poll /api/v1/jobs/{job_id} for results."
+
+
+class JobStatusResponse(BaseModel):
+    """Returned by GET /api/v1/jobs/{job_id}."""
+    job_id:     str
+    status:     str                         # pending | processing | completed | failed
+    filename:   Optional[str]   = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    result:     Optional[AnalysisResult] = None   # present when status=completed
+    error:      Optional[str]   = None            # present when status=failed
+
