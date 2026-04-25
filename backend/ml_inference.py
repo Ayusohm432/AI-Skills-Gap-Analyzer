@@ -221,3 +221,101 @@ def compute_readiness_score(
     if total == 0:
         return 0.0
     return round(len(found_skills) / total * 100, 2)
+
+
+# ── Skill categorization (rule-based taxonomy) ────────────────────────────────
+
+# Lightweight keyword → category mapping.
+# Extend this dict as the skill taxonomy grows.
+_SKILL_CATEGORY_MAP: dict[str, str] = {
+    # Languages
+    "python": "languages", "javascript": "languages", "typescript": "languages",
+    "java": "languages", "go": "languages", "rust": "languages", "c++": "languages",
+    "c#": "languages", "kotlin": "languages", "swift": "languages", "r": "languages",
+    "scala": "languages", "php": "languages", "ruby": "languages",
+    # Frontend
+    "react": "frontend", "vue": "frontend", "angular": "frontend", "next.js": "frontend",
+    "html": "frontend", "css": "frontend", "tailwindcss": "frontend", "svelte": "frontend",
+    # Backend / APIs
+    "node.js": "backend", "fastapi": "backend", "django": "backend", "flask": "backend",
+    "spring boot": "backend", "express": "backend", "api design": "backend",
+    "rest": "backend", "graphql": "backend",
+    # Databases
+    "sql": "databases", "postgresql": "databases", "mysql": "databases",
+    "mongodb": "databases", "redis": "databases", "elasticsearch": "databases",
+    "cassandra": "databases", "dynamodb": "databases",
+    # Cloud / DevOps
+    "aws": "cloud_devops", "gcp": "cloud_devops", "azure": "cloud_devops",
+    "docker": "cloud_devops", "kubernetes": "cloud_devops", "terraform": "cloud_devops",
+    "ci/cd": "cloud_devops", "jenkins": "cloud_devops", "github actions": "cloud_devops",
+    # ML / Data Science
+    "machine learning": "ml_ai", "deep learning": "ml_ai", "tensorflow": "ml_ai",
+    "pytorch": "ml_ai", "scikit-learn": "ml_ai", "nlp": "ml_ai",
+    "pandas": "data", "numpy": "data", "statistics": "data",
+    "data visualization": "data", "tableau": "data", "power bi": "data",
+    # MLOps
+    "mlops": "mlops", "mlflow": "mlops", "kubeflow": "mlops",
+    "feature engineering": "mlops", "model deployment": "mlops",
+    # Security
+    "linux": "security", "networking": "security", "firewalls": "security",
+    "siem": "security", "cryptography": "security", "penetration testing": "security",
+}
+
+
+def _skill_category(skill: str) -> str:
+    """Return the category for a single skill name."""
+    return _SKILL_CATEGORY_MAP.get(skill.lower(), "general")
+
+
+def categorize_skills(skills: list[str]) -> dict[str, list[str]]:
+    """
+    Group a list of skill names into domain categories.
+
+    Returns
+    -------
+    dict mapping category name → list of skills in that category.
+    Only non-empty categories are included.
+    """
+    groups: dict[str, list[str]] = {}
+    for skill in skills:
+        cat = _skill_category(skill)
+        groups.setdefault(cat, []).append(skill)
+    return groups
+
+
+def rank_missing_skills(
+    missing_skills: list[str],
+    confidences:    dict[str, float],
+) -> list[dict]:
+    """
+    Attach ML metadata to each missing skill and assign a priority tier.
+
+    Parameters
+    ----------
+    missing_skills : ordered list of missing skill names
+    confidences    : {skill: float} sigmoid probabilities from LSTM
+                     (may be empty when falling back to rule-based)
+
+    Returns
+    -------
+    List of dicts matching the MissingSkillRanked schema:
+        [{"skill": str, "likelihood": float, "category": str, "priority": str}]
+    """
+    ranked = []
+    for skill in missing_skills:
+        likelihood = round(float(confidences.get(skill, 0.5)), 4)
+        category   = _skill_category(skill)
+        # Priority tiers based on LSTM probability
+        if likelihood >= 0.75:
+            priority = "high"
+        elif likelihood >= 0.45:
+            priority = "medium"
+        else:
+            priority = "low"
+        ranked.append({
+            "skill":      skill,
+            "likelihood": likelihood,
+            "category":   category,
+            "priority":   priority,
+        })
+    return ranked
