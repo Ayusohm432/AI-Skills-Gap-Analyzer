@@ -35,7 +35,7 @@ from slowapi.errors import RateLimitExceeded
 # Load environment variables
 load_dotenv()
 
-from database import analyses_collection, jobs_collection, users_collection, refresh_tokens_collection
+from database import analyses_collection, jobs_collection, users_collection, refresh_tokens_collection, analysis_jobs_collection
 from nlp.engine import (
     extract_text_from_pdf, 
     extract_skills_from_text,
@@ -46,6 +46,7 @@ from nlp.engine import (
 )
 from security import get_current_user
 from routes import auth, user
+from routes import jobs
 
 # ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
@@ -78,6 +79,9 @@ async def lifespan(app: FastAPI):
     # 2. MongoDB indexes
     await users_collection.create_index("email", unique=True)
     await refresh_tokens_collection.create_index("expires_at", expireAfterSeconds=0)
+    # Index job lookups by user (for polling) + TTL auto-expire after 7 days
+    await analysis_jobs_collection.create_index("user_id")
+    await analysis_jobs_collection.create_index("created_at", expireAfterSeconds=60 * 60 * 24 * 7)
 
     # 3. Load ML models in a thread pool so we don't block the event loop.
     #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
@@ -135,19 +139,10 @@ app.add_middleware(
 # Register Routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(user.router, prefix="/api/v1/user", tags=["User Profile"])
+app.include_router(jobs.router, prefix="/api/v1", tags=["Resume Analysis"])
 
-class AnalysisResponse(BaseModel):
-    job_id: str
-    status: str
-    target_role: str
-    skills_detected: List[str]
-    skill_confidences: dict = {}   # {skill_name: confidence_score}
-    missing_skills: List[str]
-    readiness_score: float
-    roadmap: list
-    interview_questions: List[str]
 
-@app.get("/health")
+@app.get("/health", tags=["Health"])
 def health_check():
     """Returns service liveness + ML model load status."""
     bundle: dict | None = getattr(app.state, "ml_models", None)
@@ -163,162 +158,4 @@ def health_check():
         "ml_load_time_seconds": ml_health["load_time_seconds"],
     }
 
-@app.post("/api/v1/analyze/resume", response_model=AnalysisResponse)
-async def analyze_resume(
-    request: Request,
-    role: str = Form("Auto Detect"),
-    resume: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Accepts a resume file upload and returns a full skill-gap analysis.
 
-    Pipeline
-    --------
-    1. Extract raw text (PDF / DOCX)
-    2. NLP skill extraction (keyword + semantic)
-    3. ML role prediction  (Random Forest)  → falls back to NLP match_role_and_skills
-    4. ML missing-skills   (LSTM)           → falls back to rule-based diff
-    5. ML readiness score  (coverage ratio)
-    6. Generate roadmap + interview questions
-    7. Persist result to MongoDB
-    """
-    if not resume:
-        return AnalysisResponse(
-            job_id="error", status="failed", target_role=role,
-            skills_detected=[], missing_skills=[], readiness_score=0,
-            roadmap=[], interview_questions=[]
-        )
-
-    logger.info("Received file: %s  |  requested role: %s", resume.filename, role)
-
-    # ── 1. Extract text ────────────────────────────────────────────────────
-    file_bytes = await resume.read()
-    raw_text   = extract_text_from_pdf(file_bytes)
-
-    # ── 2. NLP skill extraction (keyword + semantic) ───────────────────────
-    combined_results  = extract_skills_combined(raw_text)
-    found_skills      = [r["skill"] for r in combined_results]
-    skill_confidences = {r["skill"]: r["confidence"] for r in combined_results}
-
-    # ── 3. Role prediction (ML first, NLP fallback) ────────────────────────
-    bundle: dict | None = getattr(request.app.state, "ml_models", None)
-
-    ml_role_result = predict_role(found_skills, bundle or {}) if bundle else \
-        {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
-
-    if ml_role_result["source"] == "ml" and role == "Auto Detect":
-        # Use ML-predicted role
-        target_role     = ml_role_result["predicted_role"]
-        role_confidence = ml_role_result["confidence"]
-        logger.info("ML predicted role: %s (%.1f%%)", target_role, role_confidence * 100)
-    else:
-        # Fall back to NLP-based match
-        cursor  = jobs_collection.find({})
-        db_roles = await cursor.to_list(length=100)
-        roles_db = {r["role_name"]: r["required_skills"] for r in db_roles}
-
-        if not roles_db:
-            roles_db = {
-                "Data Scientist":           ["Python", "SQL", "Machine Learning", "Statistics", "Pandas", "TensorFlow"],
-                "Machine Learning Engineer": ["Python", "Docker", "Machine Learning", "TensorFlow", "MLOps", "AWS"],
-                "Backend Developer":         ["Node.js", "Python", "SQL", "Docker", "AWS", "API Design", "MongoDB", "FastAPI"],
-                "Frontend Developer":        ["React", "JavaScript", "HTML", "CSS", "TypeScript", "TailwindCSS", "Next.js"],
-                "Cyber Security Analyst":    ["Linux", "Networking", "Python", "SIEM", "Firewalls", "Cryptography"],
-            }
-
-        analysis        = match_role_and_skills(found_skills, roles_db, role)
-        target_role     = analysis["target_role"]
-        role_confidence = 0.0
-        logger.info("NLP matched role: %s", target_role)
-
-    # ── 4. Missing-skills prediction (LSTM first, rule-based fallback) ─────
-    # Determine seniority (can be extended to detect from resume later)
-    seniority = "Mid-level"
-
-    ml_missing = predict_missing_skills(
-        current_skills=found_skills,
-        target_role=target_role or "",
-        seniority=seniority,
-        bundle=bundle,
-        top_n=15,
-    )
-
-    if ml_missing["source"] == "ml" and ml_missing["missing_skills"]:
-        missing_skills   = ml_missing["missing_skills"]
-        identified_skills = found_skills
-        logger.info("LSTM predicted %d missing skills", len(missing_skills))
-    else:
-        # Rule-based fallback: re-run NLP analysis if we haven't already
-        if ml_role_result["source"] == "ml":
-            cursor   = jobs_collection.find({})
-            db_roles = await cursor.to_list(length=100)
-            roles_db = {r["role_name"]: r["required_skills"] for r in db_roles}
-            if not roles_db:
-                roles_db = {
-                    "Data Scientist":           ["Python", "SQL", "Machine Learning", "Statistics", "Pandas", "TensorFlow"],
-                    "Machine Learning Engineer": ["Python", "Docker", "Machine Learning", "TensorFlow", "MLOps", "AWS"],
-                    "Backend Developer":         ["Node.js", "Python", "SQL", "Docker", "AWS", "API Design", "MongoDB", "FastAPI"],
-                    "Frontend Developer":        ["React", "JavaScript", "HTML", "CSS", "TypeScript", "TailwindCSS", "Next.js"],
-                    "Cyber Security Analyst":    ["Linux", "Networking", "Python", "SIEM", "Firewalls", "Cryptography"],
-                }
-            analysis = match_role_and_skills(found_skills, roles_db, target_role or "Auto Detect")
-        missing_skills    = analysis["missing_skills"]
-        identified_skills = analysis["identified_skills"]
-        logger.info("NLP fallback: %d missing skills", len(missing_skills))
-
-    # ── 5. Readiness score ─────────────────────────────────────────────────
-    readiness_score = compute_readiness_score(identified_skills, missing_skills)
-
-    # ── 6. Roadmap + interview questions ───────────────────────────────────
-    roadmap      = generate_roadmap(missing_skills)
-    interview_qs = generate_interview_questions(missing_skills)
-
-    # ── 7. Persist to MongoDB ──────────────────────────────────────────────
-    document = {
-        "user_id":          current_user["id"],
-        "target_role":      target_role,
-        "readiness_score":  readiness_score,
-        "identified_skills": identified_skills,
-        "missing_skills":   missing_skills,
-        "roadmap":          roadmap,
-        "interview_questions": interview_qs,
-        "ml_role_source":   ml_role_result["source"],
-        "ml_missing_source": ml_missing["source"],
-        "created_at":       datetime.now(timezone.utc),
-    }
-    result = await analyses_collection.insert_one(document)
-
-    return AnalysisResponse(
-        job_id=str(result.inserted_id),
-        status="completed",
-        target_role=target_role or "",
-        skills_detected=identified_skills,
-        skill_confidences=skill_confidences,
-        missing_skills=missing_skills,
-        readiness_score=readiness_score,
-        roadmap=roadmap,
-        interview_questions=interview_qs,
-    )
-
-@app.get("/api/v1/jobs/roles")
-async def get_roles():
-    """Returns canonical roles available in the system dynamically from the database"""
-    cursor = jobs_collection.find({}, {"role_name": 1, "_id": 0})
-    db_roles = await cursor.to_list(length=100)
-    
-    roles = [r["role_name"] for r in db_roles]
-    
-    # Always ensure Auto Detect is an option at the top
-    if not roles:
-         roles = [
-            "Data Scientist",
-            "Machine Learning Engineer",
-            "Backend Developer",
-            "Frontend Developer",
-            "Cyber Security Analyst"
-        ]
-        
-    return {
-        "roles": ["Auto Detect"] + roles
-    }
