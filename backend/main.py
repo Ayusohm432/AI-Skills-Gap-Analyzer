@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+import asyncio
+import logging
 import time
 import json
 import os
@@ -9,6 +14,13 @@ import threading
 import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+
+from ml_loader import load_all_models, health_summary
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -29,12 +41,7 @@ from nlp.engine import (
 from security import get_current_user
 from routes import auth, user
 
-# Initialize Limiter
-limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="AI Skill Gap Analyzer API", version="1.0.0")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
+# ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
     url = os.environ.get("RENDER_EXTERNAL_URL")
     print("KeepAlive URL:", url)
@@ -50,21 +57,48 @@ def keep_alive():
         except Exception as e:
             print("KeepAlive error:", e)
 
-        time.sleep(600) 
+        time.sleep(600)
 
-@app.on_event("startup")
-async def startup_event():
-    # This runs the keep_alive function in a background thread 
-    # so it doesn't block your FastAPI server from handling real requests.
+
+# ── FastAPI lifespan (replaces deprecated @on_event) ─────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run startup tasks, yield control to FastAPI, then run shutdown tasks."""
+
+    # 1. Keep-alive background thread (Render free tier)
     thread = threading.Thread(target=keep_alive, daemon=True)
     thread.start()
-    
-    # Create unique index for email
+
+    # 2. MongoDB indexes
     await users_collection.create_index("email", unique=True)
-    
-    # Create TTL index for refresh tokens (automatic cleanup after expiry)
-    # The record should have an 'expires_at' field
     await refresh_tokens_collection.create_index("expires_at", expireAfterSeconds=0)
+
+    # 3. Load ML models in a thread pool so we don't block the event loop.
+    #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
+    loop = asyncio.get_running_loop()
+    try:
+        bundle = await loop.run_in_executor(None, load_all_models)
+    except Exception as exc:
+        logging.getLogger("ml_loader").error("Fatal error during model loading: %s", exc)
+        bundle = None
+
+    app.state.ml_models = bundle
+
+    yield  # ← app is running here
+
+    # Shutdown: nothing special required for sklearn/keras models
+    logging.getLogger("ml_loader").info("Shutting down – ML models released.")
+
+
+# ── Initialize Limiter & FastAPI app ─────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI(
+    title="AI Skill Gap Analyzer API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     
 from urllib.parse import urlparse
 
@@ -109,7 +143,19 @@ class AnalysisResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "backend-api"}
+    """Returns service liveness + ML model load status."""
+    bundle: dict | None = getattr(app.state, "ml_models", None)
+    ml_health = health_summary(bundle)
+
+    overall_status = "ok" if ml_health["ml_models"] != "failed" else "degraded"
+
+    return {
+        "status": overall_status,
+        "service": "backend-api",
+        "ml_models": ml_health["ml_models"],
+        "ml_artifacts": ml_health["artifacts"],
+        "ml_load_time_seconds": ml_health["load_time_seconds"],
+    }
 
 @app.post("/api/v1/analyze/resume", response_model=AnalysisResponse)
 async def analyze_resume(
