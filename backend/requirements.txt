@@ -25,3 +25,4 @@ requests
 pandas
 kagglehub
 numpy
+tensorflow
