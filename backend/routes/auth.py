@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 from typing import Any
-from models import UserCreate, UserResponse, Token, UserInDB
+from models import UserCreate, UserResponse, Token, UserInDB, LoginRequest
 from database import users_collection, refresh_tokens_collection
 from security import (
     get_password_hash, 
@@ -43,14 +43,58 @@ async def register(request: Request, user_in: UserCreate):
     
     return {"message": "User registered successfully", "id": str(result.inserted_id)}
 
-@router.post("/login")
+
+# ── OAuth2-compatible token endpoint (used by Swagger UI "Authorize" button) ──
+# Swagger sends application/x-www-form-urlencoded with username + password fields.
+# This endpoint translates that to the same token flow as /login.
+
+@router.post("/token", response_model=Token, include_in_schema=False)
+async def token_for_swagger(
+    request: Request,
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+):
+    """
+    OAuth2 password flow token endpoint — consumed by Swagger UI only.
+    The frontend uses POST /login (JSON) instead.
+    """
+    user = await users_collection.find_one({"email": form_data.username})
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token(data={"email": user["email"]})
+    refresh_token, jti, expires_at = create_refresh_token(data={"email": user["email"]})
+
+    await refresh_tokens_collection.insert_one({
+        "jti": jti,
+        "email": user["email"],
+        "user_id": str(user["_id"]),
+        "expires_at": expires_at,
+    })
+
+    response.set_cookie(
+        key="refresh_token", value=refresh_token,
+        httponly=True, max_age=7 * 24 * 60 * 60,
+        samesite="lax", secure=False,
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post(
+    "/login",
+    response_model=Token,
+    summary="Login with email and password",
+    description="Authenticates user credentials and returns a JWT access token. The refresh token is set as an HttpOnly cookie.",
+)
 @limiter.limit("5/minute")
-async def login(request: Request, response: Response, login_data: dict):
-    email = login_data.get("email")
-    password = login_data.get("password")
-    
-    user = await users_collection.find_one({"email": email})
-    if not user or not verify_password(password, user["hashed_password"]):
+async def login(request: Request, response: Response, login_data: LoginRequest):
+    user = await users_collection.find_one({"email": login_data.email})
+    if not user or not verify_password(login_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

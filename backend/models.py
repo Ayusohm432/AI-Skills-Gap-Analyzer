@@ -99,6 +99,23 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     email: Optional[str] = None
 
+class LoginRequest(BaseModel):
+    """Credentials for the JSON login endpoint."""
+    email:    EmailStr = Field(..., description="Registered email address",
+                               json_schema_extra={"example": "user@example.com"})
+    password: str      = Field(..., min_length=1, description="Account password",
+                               json_schema_extra={"example": "yourpassword"})
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "password": "yourpassword",
+            }
+        }
+    )
+
+
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     target_role: Optional[str] = None
@@ -119,17 +136,92 @@ class UserUpdate(BaseModel):
 
 # ── Job / Background-task models ──────────────────────────────────────────────
 
+class RoleAlternative(BaseModel):
+    """A single alternative role prediction with its confidence score."""
+    role:       str
+    confidence: float = Field(ge=0.0, le=1.0, description="Model confidence (0–1)")
+
+
+class MissingSkillRanked(BaseModel):
+    """A recommended missing skill with ML-derived metadata."""
+    skill:      str
+    likelihood: float  = Field(ge=0.0, le=1.0, description="LSTM sigmoid probability (0–1)")
+    category:   str    = Field(default="general",  description="Skill domain category")
+    priority:   str    = Field(default="medium",   description="high | medium | low")
+
+
 class AnalysisResult(BaseModel):
-    """Full analysis payload stored inside a completed job document."""
-    target_role:        str
-    skills_detected:    List[str]
-    skill_confidences:  dict = {}
-    missing_skills:     List[str]
-    readiness_score:    float
-    roadmap:            list
-    interview_questions: List[str]
-    ml_role_source:     Optional[str] = None
-    ml_missing_source:  Optional[str] = None
+    """
+    Full analysis payload stored inside a completed job document.
+
+    Core fields
+    -----------
+    target_role, skills_detected, missing_skills, readiness_score,
+    roadmap, interview_questions
+
+    ML-derived enrichment fields
+    ----------------------------
+    role_confidence        – model's probability for the top-predicted role (0–1)
+    role_alternatives      – ranked list of next-best role predictions
+    skill_categories       – detected skills grouped by domain (backend, frontend, …)
+    missing_skills_ranked  – missing skills with likelihood, category, priority
+    model_version          – version string matching ML_MODEL_VERSION env var
+    """
+    # ── Core ──────────────────────────────────────────────────────────
+    target_role:          str
+    skills_detected:      List[str]
+    skill_confidences:    dict                     = Field(default_factory=dict,
+                                                           description="NLP confidence per detected skill")
+    missing_skills:       List[str]
+    readiness_score:      float                    = Field(ge=0.0, le=100.0)
+    roadmap:              list
+    interview_questions:  List[str]
+
+    # ── ML enrichment ─────────────────────────────────────────────────
+    role_confidence:       float                   = Field(default=0.0, ge=0.0, le=1.0,
+                                                           description="Confidence for the predicted role")
+    role_alternatives:     List[RoleAlternative]   = Field(default_factory=list,
+                                                           description="Top alternative role predictions")
+    skill_categories:      dict                    = Field(default_factory=dict,
+                                                           description="Detected skills grouped by domain")
+    missing_skills_ranked: List[MissingSkillRanked] = Field(default_factory=list,
+                                                            description="Missing skills with ML ranking")
+    model_version:         str                     = Field(default="unknown",
+                                                           description="ML artifact version used")
+
+    # ── Provenance ────────────────────────────────────────────────────
+    ml_role_source:        Optional[str]           = None
+    ml_missing_source:     Optional[str]           = None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "target_role": "Data Scientist",
+                "skills_detected": ["Python", "Pandas", "SQL"],
+                "skill_confidences": {"Python": 0.98, "Pandas": 0.91},
+                "missing_skills": ["TensorFlow", "MLOps"],
+                "readiness_score": 72.5,
+                "roadmap": [],
+                "interview_questions": [],
+                "role_confidence": 0.92,
+                "role_alternatives": [
+                    {"role": "ML Engineer", "confidence": 0.06},
+                    {"role": "Data Analyst",  "confidence": 0.02},
+                ],
+                "skill_categories": {
+                    "data":     ["Python", "Pandas", "SQL"],
+                    "general":  [],
+                },
+                "missing_skills_ranked": [
+                    {"skill": "TensorFlow", "likelihood": 0.89, "category": "ml", "priority": "high"},
+                    {"skill": "MLOps",      "likelihood": 0.74, "category": "mlops", "priority": "medium"},
+                ],
+                "model_version": "v1.0",
+                "ml_role_source": "ml",
+                "ml_missing_source": "fallback",
+            }
+        }
+    )
 
 
 class JobAcceptedResponse(BaseModel):
