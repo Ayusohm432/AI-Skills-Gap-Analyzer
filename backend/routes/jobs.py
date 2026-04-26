@@ -41,6 +41,7 @@ ALLOWED_MIME   = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/msword",
+    "text/plain",
 }
 
 _DEFAULT_ROLES = [
@@ -113,6 +114,7 @@ async def submit_resume_analysis(
         "status":         "pending",
         "requested_role": role,
         "filename":       resume.filename,
+        "content_type":   content_type,
         "created_at":     now,
         "updated_at":     now,
         "result":         None,
@@ -132,6 +134,8 @@ async def submit_resume_analysis(
         run_analysis,
         job_id=job_id,
         file_bytes=file_bytes,
+        filename=resume.filename or "",
+        content_type=content_type,
         role=role,
         user_id=current_user["id"],
         ml_bundle=ml_bundle,
