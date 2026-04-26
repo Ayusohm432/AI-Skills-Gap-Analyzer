@@ -151,19 +151,39 @@ def match_role_and_skills(resume_skills, roles_db, user_given_role=None):
         "identified_skills": list(resume_skills_set)
     }
 
-def generate_roadmap(missing_skills):
+import urllib.parse
+
+def generate_roadmap(missing_skills_ranked):
+    if not missing_skills_ranked:
+        return []
+
+    # Handle legacy lists of strings gracefully
+    normalized = []
+    for item in missing_skills_ranked:
+        if isinstance(item, str):
+            normalized.append({"skill": item, "likelihood": 0.5, "priority": "medium"})
+        else:
+            normalized.append(item)
+
+    # Sort by likelihood (highest first) so high-likelihood skills appear in first weeks
+    sorted_skills = sorted(normalized, key=lambda x: x.get("likelihood", 0.0), reverse=True)
+
     roadmap = []
     week = 1
-    for skill in missing_skills:
+    for item in sorted_skills:
+        skill = item["skill"]
+        encoded = urllib.parse.quote(skill)
+        
         roadmap.append({
             "week": f"Week {week}-{week+1}",
             "focus": f"{skill.title()} Basics & Application",
             "resources": [
-                f"Coursera: Modern {skill.title()}",
-                f"YouTube: {skill.title()} Crash Course"
+                f"Coursera: https://www.coursera.org/search?query={encoded}",
+                f"YouTube: https://www.youtube.com/results?search_query={encoded}+crash+course"
             ]
         })
         week += 2
+        
     return roadmap
 
 def generate_interview_questions(missing_skills):

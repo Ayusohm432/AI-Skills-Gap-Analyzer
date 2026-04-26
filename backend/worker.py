@@ -217,7 +217,7 @@ async def run_analysis(
         missing_skills_ranked = rank_missing_skills(missing_skills, missing_confidences)
 
         # ── 7. Roadmap + interview questions ──────────────────────────
-        roadmap      = generate_roadmap(missing_skills)
+        roadmap      = generate_roadmap(missing_skills_ranked)
         interview_qs = generate_interview_questions(missing_skills)
 
         # ── 8. Persist full result to analyses_collection ─────────────
