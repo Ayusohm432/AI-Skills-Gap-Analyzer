@@ -186,13 +186,54 @@ def generate_roadmap(missing_skills_ranked):
         
     return roadmap
 
-def generate_interview_questions(missing_skills):
+from nlp.interview_bank import (
+    BEHAVIORAL_QUESTIONS,
+    SYSTEM_DESIGN_QUESTIONS,
+    TECHNICAL_SKILL_QUESTIONS,
+    get_role_domain,
+)
+import random
+
+def generate_interview_questions(missing_skills: list, role: str = "General Developer"):
+    """
+    Generate a categorized list of 10-15 interview questions based on the role and missing skills.
+    Returns a list of dicts with 'question', 'category', and 'difficulty'.
+    """
     questions = []
-    for skill in missing_skills[:5]:
-        questions.append(f"Can you explain the core concepts of {skill.title()} and how you'd use it in a production project?")
-    if not questions:
-        questions.append("Can you walk us through your most complex project, including the architecture and challenges?")
-    return questions
+    
+    # 1. Behavioral (always include 3-4)
+    num_behavioral = min(4, len(BEHAVIORAL_QUESTIONS))
+    questions.extend(random.sample(BEHAVIORAL_QUESTIONS, num_behavioral))
+    
+    # 2. System Design (include 2-3 based on role domain)
+    domain = get_role_domain(role)
+    sys_design_pool = SYSTEM_DESIGN_QUESTIONS.get(domain, SYSTEM_DESIGN_QUESTIONS["general"])
+    num_sys_design = min(3, len(sys_design_pool))
+    questions.extend(random.sample(sys_design_pool, num_sys_design))
+    
+    # 3. Technical (include 6-8 based on missing skills to probe gaps)
+    # Extract skill strings (handling both string lists and ranked dicts)
+    skill_names = [s["skill"].lower() if isinstance(s, dict) else str(s).lower() for s in missing_skills]
+    tech_pool = []
+    
+    for skill in skill_names:
+        if skill in TECHNICAL_SKILL_QUESTIONS:
+            tech_pool.extend(TECHNICAL_SKILL_QUESTIONS[skill])
+            
+    # If not enough missing-skill-specific questions, pad with general python/javascript/sql
+    if len(tech_pool) < 6:
+        for fallback in ["python", "javascript", "sql"]:
+            if fallback not in skill_names:
+                tech_pool.extend(TECHNICAL_SKILL_QUESTIONS[fallback])
+                
+    num_tech = min(8, len(tech_pool))
+    if tech_pool:
+        questions.extend(random.sample(tech_pool, num_tech))
+        
+    # Shuffle the final list so it doesn't always start with behavioral
+    random.shuffle(questions)
+    
+    return questions[:15]
 
 
 def _merge_results(

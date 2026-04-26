@@ -134,6 +134,20 @@ class UserUpdate(BaseModel):
     )
 
 
+# ── Interview Questions Models ──────────────────────────────────────────────
+
+class InterviewQuestion(BaseModel):
+    question:   str
+    category:   str  = Field(description="technical | behavioral | system design")
+    difficulty: str  = Field(description="easy | medium | hard")
+
+class InterviewQuestionRequest(BaseModel):
+    predicted_role: str = Field(..., description="The target or predicted job role")
+    missing_skills: List[str] = Field(..., description="List of missing skills identified")
+
+class InterviewQuestionResponse(BaseModel):
+    questions: List[InterviewQuestion]
+
 # ── Job / Background-task models ──────────────────────────────────────────────
 
 class RoleAlternative(BaseModel):
@@ -175,7 +189,7 @@ class AnalysisResult(BaseModel):
     missing_skills:       List[str]
     readiness_score:      float                    = Field(ge=0.0, le=100.0)
     roadmap:              list
-    interview_questions:  List[str]
+    interview_questions:  List[InterviewQuestion]
 
     # ── ML enrichment ─────────────────────────────────────────────────
     role_confidence:       float                   = Field(default=0.0, ge=0.0, le=1.0,
@@ -218,7 +232,13 @@ class AnalysisResult(BaseModel):
                 "missing_skills": ["TensorFlow", "MLOps"],
                 "readiness_score": 72.5,
                 "roadmap": [],
-                "interview_questions": [],
+                "interview_questions": [
+                    {
+                        "question": "Explain the bias-variance tradeoff.",
+                        "category": "technical",
+                        "difficulty": "medium"
+                    }
+                ],
                 "role_confidence": 0.92,
                 "role_alternatives": [
                     {"role": "ML Engineer", "confidence": 0.06},
