@@ -5,9 +5,71 @@ from typing import Any
 
 from nlp.config import NLPConfig
 from nlp.semantic import extract_skills_semantic
-from nlp.pdf_processor import extract_text_from_pdf  # noqa: F401 – re-exported for main.py
+from nlp.pdf_processor import extract_text_from_pdf   # noqa: F401 – re-exported
+from nlp.docx_processor import extract_text_from_docx  # noqa: F401 – re-exported
+from nlp.txt_processor import extract_text_from_txt    # noqa: F401 – re-exported
 
 logger = logging.getLogger(__name__)
+
+# ── MIME-type → file extension mapping used by the dispatcher ─────────────────
+_MIME_TO_EXT: dict[str, str] = {
+    "application/pdf":                                                              "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document":     "docx",
+    "application/msword":                                                           "docx",
+    "text/plain":                                                                   "txt",
+}
+
+
+def extract_text(file_bytes: bytes, content_type: str = "", filename: str = "") -> str:
+    """
+    Unified text-extraction dispatcher.
+
+    Routes the raw file bytes to the correct processor based on *content_type*
+    (MIME string).  When the MIME type is absent or unrecognised, the function
+    falls back to guessing from the *filename* extension.
+
+    Parameters
+    ----------
+    file_bytes   : Raw bytes of the uploaded file.
+    content_type : MIME type string supplied by the HTTP client.
+    filename     : Original filename (used as extension fallback).
+
+    Returns
+    -------
+    Cleaned plain-text string, or "" when the format is unsupported.
+    No exception is raised; errors are logged.
+    """
+    ext = _resolve_extension(content_type, filename)
+    logger.info("extract_text: content_type=%r  filename=%r  resolved_ext=%r", content_type, filename, ext)
+
+    if ext == "pdf":
+        return extract_text_from_pdf(file_bytes)
+    if ext == "docx":
+        return extract_text_from_docx(file_bytes)
+    if ext == "txt":
+        return extract_text_from_txt(file_bytes)
+
+    logger.warning(
+        "extract_text: unsupported format (content_type=%r, filename=%r) – returning empty string",
+        content_type, filename,
+    )
+    return ""
+
+
+def _resolve_extension(content_type: str, filename: str) -> str:
+    """Return a normalised extension string ('pdf', 'docx', 'txt', or '')."""
+    # 1. Try MIME type first (most reliable)
+    ext = _MIME_TO_EXT.get((content_type or "").strip().lower(), "")
+    if ext:
+        return ext
+
+    # 2. Fallback: derive from filename extension
+    if filename:
+        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if suffix in ("pdf", "docx", "doc", "txt"):
+            return "docx" if suffix in ("doc", "docx") else suffix
+
+    return ""
 
 try:
     nlp = spacy.load("en_core_web_sm")

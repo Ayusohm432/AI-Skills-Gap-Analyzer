@@ -29,6 +29,7 @@ from ml_inference import (
     rank_missing_skills,
 )
 from nlp.engine import (
+    extract_text,
     extract_text_from_pdf,
     extract_skills_combined,
     match_role_and_skills,
@@ -80,11 +81,13 @@ def _static_skill_gap(role: str, found_skills: list[str]) -> list[str]:
 # ── Main worker ───────────────────────────────────────────────────────────────
 
 async def run_analysis(
-    job_id:     str,
-    file_bytes: bytes,
-    role:       str,
-    user_id:    str,
-    ml_bundle:  dict | None,
+    job_id:       str,
+    file_bytes:   bytes,
+    filename:     str        = "",
+    content_type: str        = "application/pdf",
+    role:         str        = "Auto Detect",
+    user_id:      str        = "",
+    ml_bundle:    dict | None = None,
     jobs_collection_ref=None,   # unused (kept for signature compat)
 ) -> None:
     """
@@ -92,11 +95,13 @@ async def run_analysis(
 
     Parameters
     ----------
-    job_id      : str(ObjectId) of the job document in analysis_jobs_collection
-    file_bytes  : raw bytes of the uploaded resume file
-    role        : user-selected role, or "Auto Detect"
-    user_id     : authenticated user's id (string)
-    ml_bundle   : app.state.ml_models dict (or None if models failed to load)
+    job_id       : str(ObjectId) of the job document in analysis_jobs_collection
+    file_bytes   : raw bytes of the uploaded resume file
+    filename     : original filename — used as MIME-type fallback for dispatch
+    content_type : MIME type of the upload (pdf / docx / txt)
+    role         : user-selected role, or "Auto Detect"
+    user_id      : authenticated user's id (string)
+    ml_bundle    : app.state.ml_models dict (or None if models failed to load)
     """
     oid = ObjectId(job_id)
 
@@ -105,8 +110,14 @@ async def run_analysis(
         await _set_status(oid, "processing")
         logger.info("[job=%s] status=processing", job_id)
 
-        # ── 1. Text extraction ────────────────────────────────────────
-        raw_text = extract_text_from_pdf(file_bytes)
+        # ── 1. Text extraction (PDF / DOCX / TXT via unified dispatcher) ──────
+        raw_text = extract_text(file_bytes, content_type=content_type, filename=filename)
+        if not raw_text.strip():
+            logger.warning(
+                "[job=%s] Text extraction returned empty result "
+                "(content_type=%r, filename=%r)",
+                job_id, content_type, filename,
+            )
 
         # ── 2. NLP skill extraction ───────────────────────────────────
         combined_results  = extract_skills_combined(raw_text)
