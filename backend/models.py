@@ -190,8 +190,24 @@ class AnalysisResult(BaseModel):
                                                            description="ML artifact version used")
 
     # ── Provenance ────────────────────────────────────────────────────
-    ml_role_source:        Optional[str]           = None
-    ml_missing_source:     Optional[str]           = None
+    ml_role_source:        Optional[str]           = Field(
+        default=None,
+        description=(
+            "Origin of the role prediction. "
+            "'ml' = high-confidence Random Forest; "
+            "'low_confidence' = RF below 0.60 threshold, NLP used instead; "
+            "'fallback' = model file missing or exception raised."
+        ),
+    )
+    ml_missing_source:     Optional[str]           = Field(
+        default=None,
+        description=(
+            "Origin of the missing-skills list. "
+            "'ml' = LSTM inference; "
+            "'static_lookup' = LSTM unavailable, rule-based table used; "
+            "'fallback' = LSTM exception or bundle missing."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

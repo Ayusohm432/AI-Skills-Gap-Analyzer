@@ -64,6 +64,19 @@ _DEFAULT_ROLES_DB = {
 }
 
 
+def _static_skill_gap(role: str, found_skills: list[str]) -> list[str]:
+    """
+    Rule-based fallback: return skills required for *role* that the candidate
+    does not already have.
+
+    Uses the built-in _DEFAULT_ROLES_DB table.  Unknown roles return an empty
+    list rather than raising so the pipeline always completes.
+    """
+    required = _DEFAULT_ROLES_DB.get(role, [])
+    found_lower = {s.lower() for s in found_skills}
+    return [s for s in required if s.lower() not in found_lower]
+
+
 # ── Main worker ───────────────────────────────────────────────────────────────
 
 async def run_analysis(
@@ -106,21 +119,37 @@ async def run_analysis(
             {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
 
         if ml_role_result["source"] == "ml" and role == "Auto Detect":
-            target_role     = ml_role_result["predicted_role"]
+            # High-confidence ML prediction – use it directly
+            target_role       = ml_role_result["predicted_role"]
             identified_skills = found_skills
             logger.info("[job=%s] ML role=%s (%.0f%%)", job_id, target_role, ml_role_result["confidence"] * 100)
         else:
-            # NLP fallback
+            # Covers: source=="fallback" (model missing), "low_confidence", or user-selected role
+            if ml_role_result["source"] == "low_confidence":
+                logger.warning(
+                    "[job=%s] Role confidence %.4f below threshold – "
+                    "discarding ML prediction '%s', running NLP fallback",
+                    job_id,
+                    ml_role_result["confidence"],
+                    ml_role_result["predicted_role"],
+                )
+
             from database import jobs_collection  # noqa: PLC0415
             cursor   = jobs_collection.find({})
             db_roles = await cursor.to_list(length=100)
             roles_db = {r["role_name"]: r["required_skills"] for r in db_roles} or _DEFAULT_ROLES_DB
-            analysis         = match_role_and_skills(found_skills, roles_db, role)
-            target_role      = analysis["target_role"]
+            analysis          = match_role_and_skills(found_skills, roles_db, role)
+            target_role       = analysis["target_role"]
             identified_skills = analysis["identified_skills"]
-            logger.info("[job=%s] NLP role=%s", job_id, target_role)
 
-        # ── 4. Missing-skills (LSTM → rule-based fallback) ────────────
+            # When ML returned low-confidence override to "Auto Detect" so the
+            # frontend knows the role was not reliably determined.
+            if ml_role_result["source"] == "low_confidence":
+                target_role = "Auto Detect"
+
+            logger.info("[job=%s] NLP role=%s (ml_source=%s)", job_id, target_role, ml_role_result["source"])
+
+        # ── 4. Missing-skills (LSTM → static lookup fallback) ────────────────
         seniority  = "Mid-level"
         ml_missing = predict_missing_skills(
             current_skills=found_skills,
@@ -131,20 +160,31 @@ async def run_analysis(
         )
 
         if ml_missing["source"] == "ml" and ml_missing["missing_skills"]:
+            # LSTM succeeded with results – use them
             missing_skills    = ml_missing["missing_skills"]
             identified_skills = found_skills
             logger.info("[job=%s] LSTM predicted %d missing skills", job_id, len(missing_skills))
         else:
-            # Rule-based fallback — re-query if we used ML for role
-            if ml_role_result["source"] == "ml":
-                from database import jobs_collection  # noqa: PLC0415
-                cursor   = jobs_collection.find({})
-                db_roles = await cursor.to_list(length=100)
-                roles_db = {r["role_name"]: r["required_skills"] for r in db_roles} or _DEFAULT_ROLES_DB
-                analysis = match_role_and_skills(found_skills, roles_db, target_role or "Auto Detect")
-            missing_skills    = analysis["missing_skills"]
-            identified_skills = analysis["identified_skills"]
-            logger.info("[job=%s] NLP fallback: %d missing skills", job_id, len(missing_skills))
+            # LSTM unavailable, raised an exception, or returned nothing –
+            # use the static skill-gap lookup table as the authoritative fallback.
+            logger.warning(
+                "[job=%s] LSTM fallback (source=%s): using static skill-gap table for role '%s'",
+                job_id, ml_missing["source"], target_role,
+            )
+            missing_skills = _static_skill_gap(target_role or "", found_skills)
+            # Re-run NLP gap analysis when the static table has no entry for this role
+            if not missing_skills:
+                if ml_role_result["source"] == "ml":
+                    from database import jobs_collection  # noqa: PLC0415
+                    cursor   = jobs_collection.find({})
+                    db_roles = await cursor.to_list(length=100)
+                    roles_db = {r["role_name"]: r["required_skills"] for r in db_roles} or _DEFAULT_ROLES_DB
+                    analysis = match_role_and_skills(found_skills, roles_db, target_role or "Auto Detect")
+                missing_skills    = analysis.get("missing_skills", [])
+                identified_skills = analysis.get("identified_skills", found_skills)
+            # Tag this result so consumers know the source
+            ml_missing = {**ml_missing, "source": "static_lookup"}
+            logger.info("[job=%s] static_lookup: %d missing skills", job_id, len(missing_skills))
 
         # ── 5. Readiness score ────────────────────────────────────────
         readiness_score = compute_readiness_score(identified_skills, missing_skills)
