@@ -173,7 +173,7 @@ async def run_analysis(
         analysis_doc = {
             "user_id":               user_id,
             "job_ref":               job_id,
-            "target_role":           target_role,
+            "predicted_role":        target_role,
             "readiness_score":       readiness_score,
             "identified_skills":     identified_skills,
             "missing_skills":        missing_skills,
@@ -195,7 +195,7 @@ async def run_analysis(
         # ── 9. Build the embeddable result payload ────────────────────
         result_payload: dict[str, Any] = {
             "analysis_id":            str(inserted.inserted_id),
-            "target_role":            target_role or "",
+            "predicted_role":         target_role or "",
             "skills_detected":        identified_skills,
             "skill_confidences":      skill_confidences,
             "missing_skills":         missing_skills,

@@ -156,7 +156,7 @@ class AnalysisResult(BaseModel):
 
     Core fields
     -----------
-    target_role, skills_detected, missing_skills, readiness_score,
+    predicted_role, skills_detected, missing_skills, readiness_score,
     roadmap, interview_questions
 
     ML-derived enrichment fields
@@ -168,7 +168,7 @@ class AnalysisResult(BaseModel):
     model_version          – version string matching ML_MODEL_VERSION env var
     """
     # ── Core ──────────────────────────────────────────────────────────
-    target_role:          str
+    predicted_role:       str          = Field(description="The ML/NLP-predicted (or user-selected) role")
     skills_detected:      List[str]
     skill_confidences:    dict                     = Field(default_factory=dict,
                                                            description="NLP confidence per detected skill")
@@ -196,7 +196,7 @@ class AnalysisResult(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "target_role": "Data Scientist",
+                "predicted_role": "Data Scientist",
                 "skills_detected": ["Python", "Pandas", "SQL"],
                 "skill_confidences": {"Python": 0.98, "Pandas": 0.91},
                 "missing_skills": ["TensorFlow", "MLOps"],

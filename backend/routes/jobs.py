@@ -184,17 +184,26 @@ async def get_job_status(
     result: AnalysisResult | None = None
     if job["status"] == "completed" and job.get("result"):
         raw = job["result"]
-        result = AnalysisResult(
-            target_role=raw.get("target_role", ""),
-            skills_detected=raw.get("skills_detected", []),
-            skill_confidences=raw.get("skill_confidences", {}),
-            missing_skills=raw.get("missing_skills", []),
-            readiness_score=raw.get("readiness_score", 0.0),
-            roadmap=raw.get("roadmap", []),
-            interview_questions=raw.get("interview_questions", []),
-            ml_role_source=raw.get("ml_role_source"),
-            ml_missing_source=raw.get("ml_missing_source"),
-        )
+        # Use model_validate so every Pydantic field (core + ML enrichment)
+        # is populated automatically; unknown keys are simply ignored.
+        result = AnalysisResult.model_validate({
+            "predicted_role":         raw.get("predicted_role", ""),
+            "skills_detected":        raw.get("skills_detected", []),
+            "skill_confidences":      raw.get("skill_confidences", {}),
+            "missing_skills":         raw.get("missing_skills", []),
+            "readiness_score":        raw.get("readiness_score", 0.0),
+            "roadmap":                raw.get("roadmap", []),
+            "interview_questions":    raw.get("interview_questions", []),
+            # ML enrichment
+            "role_confidence":        raw.get("role_confidence", 0.0),
+            "role_alternatives":      raw.get("role_alternatives", []),
+            "skill_categories":       raw.get("skill_categories", {}),
+            "missing_skills_ranked":  raw.get("missing_skills_ranked", []),
+            "model_version":          raw.get("model_version", "unknown"),
+            # Provenance
+            "ml_role_source":         raw.get("ml_role_source"),
+            "ml_missing_source":      raw.get("ml_missing_source"),
+        })
 
     return JobStatusResponse(
         job_id=job_id,
