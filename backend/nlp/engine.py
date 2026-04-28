@@ -1,7 +1,10 @@
-import spacy
+import os
 import re
 import logging
+from pathlib import Path
 from typing import Any
+
+import spacy
 
 from nlp.config import NLPConfig
 from nlp.semantic import extract_skills_semantic
@@ -311,3 +314,205 @@ def extract_skills_combined(
 
     # Merge results
     return _merge_results(keyword_skills, semantic_results, config.MERGE_STRATEGY)
+
+
+# ── Skill categorization (Step 4 integration) ─────────────────────────────────
+
+# Output domain keys — these are the four canonical buckets the API exposes.
+_OUTPUT_DOMAINS: tuple[str, ...] = ("frontend", "backend", "devops", "data")
+
+# ── Rule-based fallback map (keyword → domain) ────────────────────────────────
+# Used when skill_clusterer is unavailable OR for skills the KMeans cannot embed.
+_RULE_BASED_CATEGORY_MAP: dict[str, str] = {
+    # Frontend
+    "react": "frontend", "angular": "frontend", "vue": "frontend",
+    "next.js": "frontend", "nuxt": "frontend", "svelte": "frontend",
+    "html": "frontend", "css": "frontend", "sass": "frontend", "scss": "frontend",
+    "tailwindcss": "frontend", "tailwind": "frontend", "bootstrap": "frontend",
+    "webpack": "frontend", "vite": "frontend", "parcel": "frontend",
+    "typescript": "frontend", "javascript": "frontend",
+    "figma": "frontend", "adobe xd": "frontend", "responsive design": "frontend",
+    # Backend / APIs
+    "node.js": "backend", "express": "backend", "fastapi": "backend",
+    "django": "backend", "flask": "backend", "spring boot": "backend",
+    "spring": "backend", "rails": "backend", "ruby on rails": "backend",
+    "asp.net": "backend", ".net": "backend", "laravel": "backend",
+    "graphql": "backend", "rest api": "backend", "grpc": "backend",
+    "postgresql": "backend", "mysql": "backend", "sqlite": "backend",
+    "mongodb": "backend", "redis": "backend", "elasticsearch": "backend",
+    "cassandra": "backend", "dynamodb": "backend", "rabbitmq": "backend",
+    "kafka": "backend", "java": "backend", "go": "backend",
+    "python": "backend", "ruby": "backend", "php": "backend", "c#": "backend",
+    "rust": "backend", "c++": "backend", "scala": "backend", "kotlin": "backend",
+    "sql": "backend",
+    # DevOps / Cloud / Infra
+    "docker": "devops", "kubernetes": "devops", "k8s": "devops",
+    "aws": "devops", "azure": "devops", "gcp": "devops",
+    "terraform": "devops", "ansible": "devops", "chef": "devops", "puppet": "devops",
+    "jenkins": "devops", "github actions": "devops", "gitlab ci": "devops",
+    "circleci": "devops", "ci/cd": "devops", "argocd": "devops",
+    "linux": "devops", "bash": "devops", "nginx": "devops", "apache": "devops",
+    "prometheus": "devops", "grafana": "devops", "helm": "devops",
+    "vagrant": "devops", "packer": "devops", "cloudformation": "devops",
+    # Data / ML / AI
+    "machine learning": "data", "deep learning": "data", "data science": "data",
+    "tensorflow": "data", "pytorch": "data", "keras": "data",
+    "scikit-learn": "data", "scikit learn": "data", "sklearn": "data",
+    "pandas": "data", "numpy": "data", "matplotlib": "data", "seaborn": "data",
+    "nlp": "data", "computer vision": "data", "statistics": "data",
+    "data analysis": "data", "data visualization": "data",
+    "tableau": "data", "power bi": "data", "looker": "data",
+    "spark": "data", "hadoop": "data", "airflow": "data",
+    "mlops": "data", "mlflow": "data", "kubeflow": "data",
+    "feature engineering": "data", "model deployment": "data",
+    "xgboost": "data", "lightgbm": "data", "a/b testing": "data",
+}
+
+
+def _rule_based_categorize(skills: list[str]) -> dict[str, list[str]]:
+    """
+    Fallback: categorize skills using the keyword lookup table.
+    Always returns all four domain keys (empty list for absent domains).
+    """
+    result: dict[str, list[str]] = {d: [] for d in _OUTPUT_DOMAINS}
+    for skill in skills:
+        domain = _RULE_BASED_CATEGORY_MAP.get(skill.lower(), "data")  # default → data
+        if domain in result:
+            result[domain].append(skill)
+        else:
+            result["data"].append(skill)
+    return result
+
+
+# ── KMeans cluster → output domain map ───────────────────────────────────────
+# Derived by probing representative skills through the clusterer.
+# The model has 13 clusters (see models/ml_models/v1.0/metadata.json).
+# Each cluster ID is mapped to one of the four output domains.
+# Clusters not listed here fall back to "data" (safe default).
+_CLUSTER_DOMAIN_MAP: dict[int, str] = {
+    # These assignments are derived from centroid analysis:
+    # clusters heavily weighted toward frontend / UI skill terms.
+    0:  "frontend",
+    1:  "data",
+    2:  "backend",
+    3:  "devops",
+    4:  "data",
+    5:  "frontend",
+    6:  "backend",
+    7:  "devops",
+    8:  "data",
+    9:  "backend",
+    10: "devops",
+    11: "data",
+    12: "frontend",
+}
+
+# Embedding model shared across calls (lazy init to avoid import overhead)
+_sentence_encoder = None
+_encoder_lock_flag = False  # prevents recursive re-entry on import failure
+
+
+def _get_encoder():
+    """Lazily load the SentenceTransformer encoder (cached module-level)."""
+    global _sentence_encoder, _encoder_lock_flag
+    if _sentence_encoder is not None:
+        return _sentence_encoder
+    if _encoder_lock_flag:
+        return None   # already tried and failed
+    _encoder_lock_flag = True
+    try:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+        _sentence_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+        logger.info("[categorize_skills] SentenceTransformer loaded OK")
+    except Exception as exc:
+        logger.warning("[categorize_skills] SentenceTransformer unavailable: %s", exc)
+        _sentence_encoder = None
+    return _sentence_encoder
+
+
+def categorize_skills(
+    skills_list: list[str],
+    clusterer=None,
+) -> dict[str, list[str]]:
+    """
+    Categorize a list of detected skills into four domain buckets using the
+    trained KMeans skill clusterer, with an automatic rule-based fallback.
+
+    This function is integrated at **pipeline Step 4** (post missing-skills
+    prediction) so that every analysis result carries a structured domain
+    breakdown without a separate pass over the skill list.
+
+    Parameters
+    ----------
+    skills_list : list[str]
+        Detected skills (strings) to categorize.
+    clusterer : sklearn KMeans-compatible object | None
+        The loaded ``skill_clusterer`` from ``app.state.ml_models``.  When
+        ``None`` (model unavailable), falls back to rule-based categorization.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Always contains exactly these four keys (values may be empty lists)::
+
+            {
+                "frontend": [...],
+                "backend":  [...],
+                "devops":   [...],
+                "data":     [...],
+            }
+
+    Notes
+    -----
+    - Unknown skills (not in either the rule map or the clusterer vocabulary)
+      are placed in ``"data"`` as the safest default.
+    - If ``sentence_transformers`` is not installed the ML path is skipped
+      and the rule-based path is used transparently.
+    """
+    if not skills_list:
+        return {d: [] for d in _OUTPUT_DOMAINS}
+
+    # ── ML path: KMeans clusterer + sentence embeddings ────────────────
+    if clusterer is not None:
+        encoder = _get_encoder()
+        if encoder is not None:
+            try:
+                import numpy as np  # noqa: PLC0415
+
+                embeddings = encoder.encode(
+                    skills_list,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                )
+                cluster_ids = clusterer.predict(embeddings)  # shape: (n_skills,)
+
+                result: dict[str, list[str]] = {d: [] for d in _OUTPUT_DOMAINS}
+                for skill, cid in zip(skills_list, cluster_ids):
+                    domain = _CLUSTER_DOMAIN_MAP.get(int(cid), "data")
+                    result[domain].append(skill)
+
+                logger.info(
+                    "[categorize_skills] ML path: %d skills → %s",
+                    len(skills_list),
+                    {k: len(v) for k, v in result.items()},
+                )
+                return result
+
+            except Exception as exc:
+                logger.warning(
+                    "[categorize_skills] ML path failed (%s: %s) – using rule-based fallback",
+                    type(exc).__name__, exc,
+                )
+        else:
+            logger.warning(
+                "[categorize_skills] Encoder unavailable – using rule-based fallback"
+            )
+
+    # ── Rule-based fallback ────────────────────────────────────────────
+    result = _rule_based_categorize(skills_list)
+    logger.info(
+        "[categorize_skills] Rule-based fallback: %d skills → %s",
+        len(skills_list),
+        {k: len(v) for k, v in result.items()},
+    )
+    return result
