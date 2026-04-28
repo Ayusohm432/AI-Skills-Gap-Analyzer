@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, GetCoreSchemaHandler, GetJsonSchemaHandler
 from pydantic_core import core_schema
 from bson import ObjectId
@@ -442,6 +442,38 @@ class GithubAnalyzeResponse(BaseModel):
                 "languages_found": {"Python": 5, "TypeScript": 3},
                 "topics_found":    ["machine-learning", "api"],
                 "source":          "github",
+            }
+        }
+    )
+
+
+# ── Mock Interview Models ───────────────────────────────────────────────────
+
+class InterviewStartRequest(BaseModel):
+    analysis_id: Optional[str] = Field(
+        None, 
+        description="ID of the analysis to use for context. If omitted, the latest completed analysis for the user is used."
+    )
+
+class InterviewResponseRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000, description="User's response to the interviewer's question")
+
+class InterviewSessionResponse(BaseModel):
+    session_id: str
+    status: str = Field("active", description="Current status of the session (active/completed/expired)")
+    message: str = Field(..., description="The interviewer's next question or feedback")
+    history: List[Dict[str, str]] = Field(default_factory=list, description="The full conversation history so far")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "session_id": "60d5ecb8b392d3001f3b3b3b",
+                "status": "active",
+                "message": "That's a great explanation of Python decorators. How would you handle a scenario where you need to preserve the metadata of the original function?",
+                "history": [
+                    {"role": "assistant", "content": "Welcome to your mock interview for the Python Backend Developer role. Let's start with decorators. Can you explain how they work?"},
+                    {"role": "user", "content": "Sure, decorators are functions that wrap other functions to modify their behavior."}
+                ]
             }
         }
     )

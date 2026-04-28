@@ -19,6 +19,12 @@ refresh_tokens_collection = db["refresh_tokens"]
 
 # Background job state tracking (pending → processing → completed/failed)
 analysis_jobs_collection = db["analysis_jobs"]
+interview_sessions_collection = db["interview_sessions"]
+
+async def ensure_indexes():
+    """Ensure necessary indexes exist in the database."""
+    # TTL index for interview sessions: expire 30 minutes after updated_at
+    await interview_sessions_collection.create_index("updated_at", expireAfterSeconds=1800)
 
 async def get_db():
     """Dependency to pass the database instance around."""
