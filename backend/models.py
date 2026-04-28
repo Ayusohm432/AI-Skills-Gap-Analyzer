@@ -196,6 +196,10 @@ class AnalysisResult(BaseModel):
                                                            description="Confidence for the predicted role")
     role_alternatives:     List[RoleAlternative]   = Field(default_factory=list,
                                                            description="Top alternative role predictions")
+    role_probabilities:    dict                    = Field(default_factory=dict,
+                                                           description="Full {role: probability} map for all roles")
+    top_predictive_skills: List[str]               = Field(default_factory=list,
+                                                           description="User's skills most predictive for the predicted role")
     skill_categories:      dict                    = Field(default_factory=dict,
                                                            description="Detected skills grouped by domain")
     missing_skills_ranked: List[MissingSkillRanked] = Field(default_factory=list,
@@ -244,6 +248,13 @@ class AnalysisResult(BaseModel):
                     {"role": "ML Engineer", "confidence": 0.06},
                     {"role": "Data Analyst",  "confidence": 0.02},
                 ],
+                "role_probabilities": {
+                    "Data Scientist": 0.92,
+                    "ML Engineer": 0.06,
+                    "Backend Developer": 0.01,
+                    "Frontend Developer": 0.01,
+                },
+                "top_predictive_skills": ["Python", "scikit-learn", "Pandas"],
                 "skill_categories": {
                     "data":     ["Python", "Pandas", "SQL"],
                     "general":  [],
@@ -277,3 +288,57 @@ class JobStatusResponse(BaseModel):
     result:     Optional[AnalysisResult] = None   # present when status=completed
     error:      Optional[str]   = None            # present when status=failed
 
+
+# ── /predict-role endpoint models ────────────────────────────────────────────
+
+class PredictRoleRequest(BaseModel):
+    """Request body for POST /api/v1/predict-role."""
+    skills: List[str] = Field(
+        ...,
+        min_length=1,
+        description="List of skills extracted from a resume or entered manually.",
+        json_schema_extra={"example": ["Python", "Pandas", "scikit-learn", "SQL", "TensorFlow"]},
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"skills": ["Python", "Pandas", "scikit-learn", "SQL", "TensorFlow"]}
+        }
+    )
+
+
+class PredictRoleResponse(BaseModel):
+    """
+    Response for the synchronous POST /api/v1/predict-role endpoint.
+
+    Provides the Random Forest role prediction together with interpretability
+    fields so the frontend can display *why* a role was chosen.
+    """
+    predicted_role:        str              = Field(description="Best-matching role or 'Auto Detect' when confidence is low")
+    confidence:            float            = Field(ge=0.0, le=1.0, description="Model confidence (0–1)")
+    role_probabilities:    dict             = Field(description="Full {role: probability} map")
+    top_predictive_skills: List[str]        = Field(description="User skills most predictive for the result")
+    role_alternatives:     List[RoleAlternative] = Field(default_factory=list,
+                                                         description="Next-best role predictions")
+    inference_ms:          float            = Field(default=0.0, description="Server-side inference time in ms")
+    source:                str              = Field(description="'ml' | 'low_confidence' | 'fallback'")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "predicted_role": "Data Scientist",
+                "confidence": 0.87,
+                "role_probabilities": {
+                    "Data Scientist": 0.87,
+                    "ML Engineer": 0.09,
+                    "Backend Developer": 0.04,
+                },
+                "top_predictive_skills": ["Python", "scikit-learn", "Pandas"],
+                "role_alternatives": [
+                    {"role": "ML Engineer", "confidence": 0.09},
+                ],
+                "inference_ms": 3.7,
+                "source": "ml",
+            }
+        }
+    )

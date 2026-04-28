@@ -25,7 +25,6 @@ from ml_inference import (
     predict_role,
     predict_missing_skills,
     compute_readiness_score,
-    categorize_skills,
     rank_missing_skills,
 )
 from nlp.engine import (
@@ -35,6 +34,7 @@ from nlp.engine import (
     match_role_and_skills,
     generate_roadmap,
     generate_interview_questions,
+    categorize_skills,          # Step 6b – KMeans-backed, rule-based fallback
 )
 
 logger = logging.getLogger("worker")
@@ -174,7 +174,10 @@ async def run_analysis(
             # LSTM succeeded with results – use them
             missing_skills    = ml_missing["missing_skills"]
             identified_skills = found_skills
-            logger.info("[job=%s] LSTM predicted %d missing skills", job_id, len(missing_skills))
+            logger.info(
+                "[job=%s] LSTM predicted %d missing skills (%.2f ms)",
+                job_id, len(missing_skills), ml_missing.get("inference_ms", 0.0),
+            )
         else:
             # LSTM unavailable, raised an exception, or returned nothing –
             # use the static skill-gap lookup table as the authoritative fallback.
@@ -201,16 +204,24 @@ async def run_analysis(
         readiness_score = compute_readiness_score(identified_skills, missing_skills)
 
         # ── 6. ML enrichment fields ───────────────────────────────────
-        # 6a. Role confidence + alternatives
-        role_confidence  = ml_role_result.get("confidence", 0.0)
+        # 6a. Role confidence + alternatives + new interpretability fields
+        role_confidence   = ml_role_result.get("confidence", 0.0)
         role_alternatives = [
             {"role": r["role"], "confidence": r["confidence"]}
             for r in ml_role_result.get("top_roles", [])
             if r["role"] != target_role   # exclude the primary prediction
         ]
+        role_probabilities    = ml_role_result.get("role_probabilities", {})
+        top_predictive_skills = ml_role_result.get("top_predictive_skills", [])
+        role_inference_ms     = ml_role_result.get("inference_ms", 0.0)
+        logger.debug("[job=%s] role inference_ms=%.2f", job_id, role_inference_ms)
 
-        # 6b. Skill categories for detected skills
-        skill_categories = categorize_skills(identified_skills)
+        # 6b. Skill categories for detected skills (Step 4 integration)
+        # Uses KMeans clusterer when available, falls back to rule-based taxonomy.
+        skill_categories = categorize_skills(
+            identified_skills,
+            clusterer=ml_bundle.get("skill_clusterer") if ml_bundle else None,
+        )
 
         # 6c. Ranked missing skills with likelihood + priority
         missing_confidences = ml_missing.get("confidences", {})
@@ -233,6 +244,8 @@ async def run_analysis(
             # ML enrichment
             "role_confidence":        role_confidence,
             "role_alternatives":      role_alternatives,
+            "role_probabilities":     role_probabilities,
+            "top_predictive_skills":  top_predictive_skills,
             "skill_categories":       skill_categories,
             "missing_skills_ranked":  missing_skills_ranked,
             "model_version":          _MODEL_VERSION,
@@ -256,6 +269,8 @@ async def run_analysis(
             # ML enrichment
             "role_confidence":         role_confidence,
             "role_alternatives":       role_alternatives,
+            "role_probabilities":      role_probabilities,
+            "top_predictive_skills":   top_predictive_skills,
             "skill_categories":        skill_categories,
             "missing_skills_ranked":   missing_skills_ranked,
             "model_version":           _MODEL_VERSION,
