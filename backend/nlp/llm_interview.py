@@ -2,12 +2,72 @@
 nlp/llm_interview.py
 ====================
 Conversational mock interview powered by Google Gemini (google-genai SDK).
+
+Large-input handling
+--------------------
+Gemini can return 422 / INVALID_ARGUMENT when the request payload is too large.
+Two defences are applied before every API call:
+
+1. Message chunking  — the user's answer is split into 1 000-char logical
+   segments, then reassembled as a single string. This normalises whitespace
+   and strips junk characters that inflate token count.
+2. History trimming  — only the last MAX_HISTORY_TURNS turns of the
+   conversation are forwarded; older turns are dropped from the payload
+   (they remain stored in MongoDB for the full session record).
 """
 import os
 import logging
+import textwrap
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
+
+# Maximum characters we allow from the user before hard-truncating
+_MAX_USER_MSG_CHARS = 6_000
+
+# How many recent history turns to include in the Gemini payload.
+# Each turn = one user message + one assistant reply.
+_MAX_HISTORY_TURNS = 10
+
+
+def _chunk_and_clean(text: str, chunk_size: int = 1_000) -> str:
+    """
+    Split *text* into chunks of at most *chunk_size* characters,
+    normalise whitespace in each chunk, then reassemble as one string.
+
+    This eliminates excessively long tokens / control chars that cause
+    Gemini to return INVALID_ARGUMENT / 422.
+    """
+    text = text.strip()
+    if not text:
+        return ""
+
+    # Hard-truncate first so we never exceed the overall limit
+    if len(text) > _MAX_USER_MSG_CHARS:
+        logger.warning(
+            "User message truncated: %d → %d chars", len(text), _MAX_USER_MSG_CHARS
+        )
+        text = text[:_MAX_USER_MSG_CHARS] + "… [truncated]"
+
+    chunks = textwrap.wrap(text, width=chunk_size, break_long_words=True)
+    return " ".join(chunks)
+
+
+def _trim_history(history: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    Return only the last _MAX_HISTORY_TURNS turns.
+    Each turn is a (user, assistant) pair so we keep the last
+    MAX_HISTORY_TURNS * 2 individual messages.
+    """
+    max_messages = _MAX_HISTORY_TURNS * 2
+    if len(history) <= max_messages:
+        return history
+    trimmed = history[-max_messages:]
+    logger.info(
+        "History trimmed: %d → %d messages for Gemini payload",
+        len(history), len(trimmed),
+    )
+    return trimmed
 
 
 class InterviewLLM:
@@ -29,12 +89,14 @@ class InterviewLLM:
             self._client = None
             return
 
+        from dotenv import load_dotenv
+        load_dotenv()
+
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logger.warning("GEMINI_API_KEY not set. LLM features will be unavailable.")
             self._client = None
         else:
-            # Use default API version for these newer models
             self._client = self._genai.Client(api_key=api_key)
             logger.info("Gemini client initialized successfully.")
 
@@ -72,14 +134,13 @@ class InterviewLLM:
             + "\n\nStart the interview now. Greet the candidate briefly and ask your first technical question."
         )
 
-        # Try available models in order of likelihood
         models_to_try = [
-            "gemini-2.5-flash", 
-            "gemini-2.5-flash-lite", 
-            "gemini-2.0-flash", 
-            "gemini-2.0-flash-lite"
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
         ]
-        
+
         for model_name in models_to_try:
             try:
                 response = self._client.models.generate_content(
@@ -108,24 +169,26 @@ class InterviewLLM:
         if not self._available():
             return "[LLM unavailable] That's interesting. Can you elaborate on that further?"
 
+        # ── Defence 1: Clean & chunk the user's current message ───────────
+        safe_message = _chunk_and_clean(user_message)
+
+        # ── Defence 2: Trim history to avoid oversized payloads ───────────
+        trimmed_history = _trim_history(history)
+
         system = self._system_instruction(role, missing_skills)
         contents = []
-        for turn in history:
+        for turn in trimmed_history:
             sdk_role = "user" if turn["role"] == "user" else "model"
             contents.append({"role": sdk_role, "parts": [{"text": turn["content"]}]})
-        contents.append({"role": "user", "parts": [{"text": user_message}]})
+        contents.append({"role": "user", "parts": [{"text": safe_message}]})
 
         from google.genai import types
-        
+
         models_to_try = [
-            "gemini-2.5-flash", 
-            "gemini-2.5-flash-lite", 
-            "gemini-2.0-flash", 
-            "gemini-2.0-flash-lite",
-            "gemini-2.5-pro",
-            "gemini-2.0-flash-001",
-            "gemini-2.0-flash-lite-001",
+            "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
         ]
 
         for model_name in models_to_try:

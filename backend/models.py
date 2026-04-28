@@ -456,7 +456,7 @@ class InterviewStartRequest(BaseModel):
     )
 
 class InterviewResponseRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000, description="User's response to the interviewer's question")
+    message: str = Field(..., min_length=1, max_length=8000, description="User's response to the interviewer's question")
 
 class InterviewSessionResponse(BaseModel):
     session_id: str
