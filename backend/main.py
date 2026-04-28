@@ -64,6 +64,7 @@ from routes import market as market_router
 from routes import progress as progress_router
 from routes import alerts as alerts_router
 from routes import benchmark as benchmark_router
+from routes import feedback as feedback_router
 from services.market_service import seed_market_data, refresh_all_roles
 from services.alerts_service import check_and_generate_alerts
 
@@ -121,6 +122,10 @@ async def lifespan(app: FastAPI):
     # Phase 5 Extension — Skill domain cache index
     from database import skill_domain_cache_collection as _sdc
     await _sdc.create_index("skill", unique=True)
+
+    # Phase 2 Extension — Feedback index
+    from database import analysis_feedback_collection as _afc
+    await _afc.create_index("job_id", unique=True)
 
     # 3. Mock Interview indexes (TTL index for automatic session expiry)
     await ensure_indexes()
@@ -221,6 +226,7 @@ app.include_router(market_router.router,    prefix="/api/v1", tags=["Market Dema
 app.include_router(benchmark_router.router, prefix="/api/v1", tags=["Market Demand"])
 app.include_router(progress_router.router,  prefix="/api/v1", tags=["Progress & Achievements"])
 app.include_router(alerts_router.router,    prefix="/api/v1", tags=["Market Alerts"])
+app.include_router(feedback_router.router,  prefix="/api/v1", tags=["Resume Analysis"])
 
 
 @app.get("/health", tags=["Health"])
