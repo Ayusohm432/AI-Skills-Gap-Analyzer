@@ -346,3 +346,102 @@ class PredictRoleResponse(BaseModel):
             }
         }
     )
+
+
+# ── GitHub Integration models ─────────────────────────────────────────────────
+
+class GithubAnalyzeRequest(BaseModel):
+    """
+    Request body for POST /api/v1/analyze/github.
+
+    Fields
+    ------
+    github_username : str
+        Public GitHub username to analyse (e.g. "octocat").
+    resume_skills   : list[str]
+        Optional skills already extracted from a resume.  They are
+        union-merged with GitHub-derived skills — no duplicates.
+    max_repos       : int
+        Maximum number of repositories to inspect (1-30, default 10).
+        Repositories are sorted by star count, forks excluded first.
+    """
+    github_username: str = Field(
+        ...,
+        min_length=1,
+        max_length=39,   # GitHub username max length
+        description="Public GitHub username",
+        json_schema_extra={"example": "octocat"},
+    )
+    resume_skills: List[str] = Field(
+        default_factory=list,
+        description="Skills already detected from a resume (optional)",
+        json_schema_extra={"example": ["Python", "Docker"]},
+    )
+    max_repos: int = Field(
+        default=10,
+        ge=1,
+        le=30,
+        description="Maximum repositories to inspect (1-30)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "github_username": "octocat",
+                "resume_skills": ["Python", "Docker"],
+                "max_repos": 10,
+            }
+        }
+    )
+
+
+class GithubAnalyzeResponse(BaseModel):
+    """
+    Response for POST /api/v1/analyze/github.
+
+    Fields
+    ------
+    github_username  : echo of the requested username
+    repos_analyzed   : number of repositories actually inspected
+    github_skills    : canonical skills extracted from GitHub data alone
+    resume_skills    : skills that were passed in from a resume (echoed back)
+    merged_skills    : deduplicated union of github_skills + resume_skills
+    skill_categories : merged_skills grouped into frontend/backend/devops/data
+    languages_found  : raw GitHub language -> occurrence-count map
+    topics_found     : deduplicated repository topic tags
+    source           : always "github" for provenance tracking
+    """
+    github_username:  str        = Field(description="Requested GitHub username")
+    repos_analyzed:   int        = Field(description="Number of repositories inspected")
+    github_skills:    List[str]  = Field(description="Skills extracted from GitHub data")
+    resume_skills:    List[str]  = Field(description="Resume skills supplied in the request")
+    merged_skills:    List[str]  = Field(description="Deduplicated union of all skill sources")
+    skill_categories: dict       = Field(
+        description="Merged skills grouped by domain (frontend/backend/devops/data)"
+    )
+    languages_found:  dict       = Field(
+        description="GitHub-reported language names and their repository occurrence counts"
+    )
+    topics_found:     List[str]  = Field(description="Deduplicated repository topic tags")
+    source:           str        = Field(default="github", description="Data provenance marker")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "github_username":  "octocat",
+                "repos_analyzed":   8,
+                "github_skills":    ["Python", "TypeScript", "Docker"],
+                "resume_skills":    ["Python", "Docker"],
+                "merged_skills":    ["Python", "TypeScript", "Docker"],
+                "skill_categories": {
+                    "backend":  ["Python"],
+                    "frontend": ["TypeScript"],
+                    "devops":   ["Docker"],
+                    "data":     [],
+                },
+                "languages_found": {"Python": 5, "TypeScript": 3},
+                "topics_found":    ["machine-learning", "api"],
+                "source":          "github",
+            }
+        }
+    )
