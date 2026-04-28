@@ -25,7 +25,6 @@ from ml_inference import (
     predict_role,
     predict_missing_skills,
     compute_readiness_score,
-    categorize_skills,
     rank_missing_skills,
 )
 from nlp.engine import (
@@ -35,6 +34,7 @@ from nlp.engine import (
     match_role_and_skills,
     generate_roadmap,
     generate_interview_questions,
+    categorize_skills,          # Step 6b – KMeans-backed, rule-based fallback
 )
 
 logger = logging.getLogger("worker")
@@ -209,8 +209,12 @@ async def run_analysis(
             if r["role"] != target_role   # exclude the primary prediction
         ]
 
-        # 6b. Skill categories for detected skills
-        skill_categories = categorize_skills(identified_skills)
+        # 6b. Skill categories for detected skills (Step 4 integration)
+        # Uses KMeans clusterer when available, falls back to rule-based taxonomy.
+        skill_categories = categorize_skills(
+            identified_skills,
+            clusterer=ml_bundle.get("skill_clusterer") if ml_bundle else None,
+        )
 
         # 6c. Ranked missing skills with likelihood + priority
         missing_confidences = ml_missing.get("confidences", {})
