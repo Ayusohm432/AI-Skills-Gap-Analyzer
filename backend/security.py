@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Union
 import uuid
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
 from dotenv import load_dotenv
@@ -125,4 +125,40 @@ async def validate_refresh_token(token: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token expired or invalid",
+        )
+
+
+# ── Admin API Key dependency ──────────────────────────────────────────────────
+# Used exclusively by write-access model management endpoints
+# (e.g. POST /api/v1/models/activate/:version).
+#
+# Callers must include the header:
+#     X-Admin-Key: <value of ADMIN_API_KEY in .env>
+#
+# Returns HTTP 503 when ADMIN_API_KEY is not configured on the server,
+# and HTTP 403 when the provided key doesn't match.
+
+_ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
+
+
+async def require_admin_key(
+    x_admin_key: str = Header(..., alias="X-Admin-Key", description="Admin API key for privileged operations"),
+) -> None:
+    """
+    FastAPI dependency that enforces admin-key authentication.
+
+    Raises
+    ------
+    503  ADMIN_API_KEY env var is not set on this server.
+    403  The provided key does not match ADMIN_API_KEY.
+    """
+    if not _ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin key is not configured on this server. Set ADMIN_API_KEY in .env.",
+        )
+    if x_admin_key != _ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin key.",
         )
