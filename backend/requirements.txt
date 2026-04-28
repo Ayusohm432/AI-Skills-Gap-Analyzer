@@ -26,4 +26,5 @@ httpx>=0.27.0
 pandas
 kagglehub
 numpy
+google-genai>=1.0.0
 tensorflow

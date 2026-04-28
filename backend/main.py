@@ -35,7 +35,15 @@ from slowapi.errors import RateLimitExceeded
 # Load environment variables
 load_dotenv()
 
-from database import analyses_collection, jobs_collection, users_collection, refresh_tokens_collection, analysis_jobs_collection
+from database import (
+    analyses_collection, 
+    jobs_collection, 
+    users_collection, 
+    refresh_tokens_collection, 
+    analysis_jobs_collection,
+    interview_sessions_collection,
+    ensure_indexes
+)
 from nlp.engine import (
     extract_text_from_pdf, 
     extract_skills_from_text,
@@ -89,6 +97,9 @@ async def lifespan(app: FastAPI):
     await analyses_collection.create_index("predicted_role")
     await analyses_collection.create_index("model_version")
     await analyses_collection.create_index("user_id")
+    
+    # 4. Mock Interview indexes (TTL index for automatic session expiry)
+    await ensure_indexes()
 
     # 3. Load ML models in a thread pool so we don't block the event loop.
     #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
