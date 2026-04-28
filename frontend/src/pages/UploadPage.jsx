@@ -171,14 +171,19 @@ export default function UploadPage() {
 
             const jobData = await pollRes.json();
 
-            // Map backend status → pipeline steps
+            // Map real backend step → 4-stage UI stepper
             if (jobData.status === "processing") {
-              if (pollProgress < 55) {
+              const backendStep = jobData.step || 1;
+              const stepLabel = jobData.step_name || "Processing...";
+              if (backendStep <= 2) {
                 setPipelineStep(1); // Extracting
-                setUploadStatus("Extracting text from resume...");
-              } else {
+                setUploadStatus(stepLabel);
+              } else if (backendStep <= 8) {
                 setPipelineStep(2); // Analyzing
-                setUploadStatus("Running ML analysis & predictions...");
+                setUploadStatus(stepLabel);
+              } else {
+                setPipelineStep(2); // Still analyzing (step 9 = storage)
+                setUploadStatus("Saving results...");
               }
             }
 
@@ -206,10 +211,23 @@ export default function UploadPage() {
         }, 2000);
       });
 
-      // ── Step 3: Save result and navigate ─────────────────────────
+      // ── Step 3: Save result + cache resume for role-swap ──────────
       setUploadProgress(100);
       setUploadStatus("Analysis Complete!");
       localStorage.setItem("analysisResult", JSON.stringify(result));
+
+      // Cache resume in sessionStorage so DashboardPage can re-submit
+      // for role swap without the user re-uploading (Issue #51)
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          sessionStorage.setItem("resumeFileBase64", reader.result);
+          sessionStorage.setItem("resumeFileName", file.name);
+          sessionStorage.setItem("resumeContentType", file.type);
+        };
+        reader.readAsDataURL(file);
+      } catch (_) { /* non-critical — swap just won't be available */ }
+
       setTimeout(() => navigate("/dashboard"), 800);
 
     } catch (err) {

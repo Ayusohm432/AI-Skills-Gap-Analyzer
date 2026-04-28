@@ -201,7 +201,7 @@ async def run_analysis(
 
             # When ML returned low-confidence override to "Auto Detect" so the
             # frontend knows the role was not reliably determined.
-            if ml_role_result["source"] == "low_confidence":
+            if ml_role_result["source"] == "low_confidence" and role == "Auto Detect":
                 target_role = "Auto Detect"
 
             logger.info("[job=%s] NLP role=%s (ml_source=%s)", job_id, target_role, ml_role_result["source"])

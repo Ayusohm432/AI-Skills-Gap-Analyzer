@@ -1,16 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, PieChart, Pie } from "recharts";
 import { jsPDF } from 'jspdf';
 import {
   CheckCircle2, XCircle, Zap, Download, MessageSquare,
-  ChevronRight, ArrowLeft, BookOpen, Loader2, Target, BarChart2, Activity, Filter
+  ChevronRight, ArrowLeft, BookOpen, Loader2, Target, BarChart2, Activity, Filter, RefreshCw
 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import PageTransition from "../components/PageTransition";
+import { secureFetch } from "../api/base";
 
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 20 },
@@ -38,7 +39,20 @@ export default function DashboardPage() {
   const [userSelectedRole, setUserSelectedRole] = useState("Auto Detect");
   const [chartView, setChartView] = useState("radar"); // "radar" | "bar"
   const [selectedCategory, setSelectedCategory] = useState(null); // donut filter
+  const [isSwapping, setIsSwapping] = useState(false); // role swap loading
+  const [swapError, setSwapError] = useState(null);
+  const swapPollRef = useRef(null);
   const prefersReducedMotion = useReducedMotion();
+
+  // Cleanup swap polling on unmount
+  useEffect(() => {
+    return () => {
+      if (swapPollRef.current) {
+        clearInterval(swapPollRef.current);
+        swapPollRef.current = null;
+      }
+    };
+  }, []);
 
   // Disable motion for users who prefer it
   const safeMotion = (delay = 0) => prefersReducedMotion
@@ -84,22 +98,106 @@ export default function DashboardPage() {
           ml_ai: [],
         },
         missing_skills_ranked: [
-          { skill: "TensorFlow",  likelihood: 0.91, category: "ml_ai",      priority: "high"   },
-          { skill: "Docker",      likelihood: 0.87, category: "cloud_devops",priority: "high"   },
-          { skill: "MLOps",       likelihood: 0.78, category: "mlops",      priority: "high"   },
-          { skill: "AWS",         likelihood: 0.65, category: "cloud_devops",priority: "medium" },
-          { skill: "PyTorch",     likelihood: 0.61, category: "ml_ai",      priority: "medium" },
+          { skill: "TensorFlow", likelihood: 0.91, category: "ml_ai", priority: "high" },
+          { skill: "Docker", likelihood: 0.87, category: "cloud_devops", priority: "high" },
+          { skill: "MLOps", likelihood: 0.78, category: "mlops", priority: "high" },
+          { skill: "AWS", likelihood: 0.65, category: "cloud_devops", priority: "medium" },
+          { skill: "PyTorch", likelihood: 0.61, category: "ml_ai", priority: "medium" },
         ],
       });
     }
   }, []);
 
-  if (!data) return (
-    <div className="min-h-screen bg-[var(--bg-deep)] flex flex-col items-center justify-center text-[var(--text-muted)]">
-      <Loader2 size={24} className="animate-spin mb-3 text-[var(--accent-warm)]" />
-      <p className="text-sm">Loading your results...</p>
-    </div>
-  );
+  if (!data) {
+    return (
+      <PageTransition>
+        <div className="min-h-screen flex items-center justify-center bg-[var(--bg-deep)]">
+          <Loader2 className="animate-spin text-[var(--accent-warm)]" size={40} />
+        </div>
+      </PageTransition>
+    );
+  }
+
+  // ── Role swap handler (Issue #51) ──────────────────────────────────
+  const handleRoleSwap = async (newRole) => {
+    // Retrieve cached resume from sessionStorage
+    const base64 = sessionStorage.getItem("resumeFileBase64");
+    const fileName = sessionStorage.getItem("resumeFileName") || "resume.pdf";
+    const contentType = sessionStorage.getItem("resumeContentType") || "application/pdf";
+
+    if (!base64) {
+      setSwapError("Resume not cached. Please re-upload from the Upload page.");
+      return;
+    }
+
+    setIsSwapping(true);
+    setSwapError(null);
+
+    try {
+      // Convert base64 back to File
+      const res = await fetch(base64);
+      const blob = await res.blob();
+      const file = new File([blob], fileName, { type: contentType });
+
+      // Submit with the new role
+      const formData = new FormData();
+      formData.append("resume", file);
+      formData.append("role", newRole);
+
+      const submitRes = await secureFetch('/api/v1/analyze/resume', {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!submitRes.ok) {
+        const errData = await submitRes.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error: ${submitRes.status}`);
+      }
+
+      const { job_id } = await submitRes.json();
+
+      // Poll until completed
+      const result = await new Promise((resolve, reject) => {
+        swapPollRef.current = setInterval(async () => {
+          try {
+            const pollRes = await secureFetch(`/api/v1/jobs/${job_id}`);
+            if (!pollRes.ok) {
+              clearInterval(swapPollRef.current);
+              swapPollRef.current = null;
+              reject(new Error(`Poll error: ${pollRes.status}`));
+              return;
+            }
+            const jobData = await pollRes.json();
+            if (jobData.status === "completed") {
+              clearInterval(swapPollRef.current);
+              swapPollRef.current = null;
+              resolve(jobData.result);
+            } else if (jobData.status === "failed") {
+              clearInterval(swapPollRef.current);
+              swapPollRef.current = null;
+              reject(new Error(jobData.error || "Re-analysis failed."));
+            }
+          } catch (err) {
+            clearInterval(swapPollRef.current);
+            swapPollRef.current = null;
+            reject(err);
+          }
+        }, 2000);
+      });
+
+      // Update dashboard data
+      setData(result);
+      setUserSelectedRole(newRole);
+      localStorage.setItem("analysisResult", JSON.stringify(result));
+      localStorage.setItem("userSelectedRole", newRole);
+      setSelectedCategory(null); // reset donut filter
+    } catch (err) {
+      console.error("Role swap failed:", err);
+      setSwapError(err.message || "Role swap failed. Try again.");
+    } finally {
+      setIsSwapping(false);
+    }
+  };
 
   const handleExportPDF = () => {
     if (!data) return;
@@ -300,79 +398,79 @@ export default function DashboardPage() {
                           ? sorted.filter(s => (s.category || 'general') === selectedCategory)
                           : sorted;
                         return (
-                        <>
-                          {selectedCategory && (
-                            <div className="flex items-center gap-2 mb-3">
-                              <Filter size={12} className="text-[var(--accent-lavender)]" />
-                              <span className="text-xs text-[var(--text-muted)]">Filtered by: <span className="text-[var(--accent-lavender)] font-medium capitalize">{selectedCategory.replace(/_/g, ' ')}</span></span>
-                              <button onClick={() => setSelectedCategory(null)} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] ml-auto underline cursor-pointer transition-colors">Clear</button>
-                            </div>
-                          )}
-                          <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin">
-                          {filtered.slice(0, 20).map((item, i) => {
-                            const skill      = typeof item === 'string' ? item : item.skill;
-                            const likelihood = item.likelihood != null
-                              ? Math.round((item.likelihood <= 1 ? item.likelihood * 100 : item.likelihood))
-                              : null;
-                            const priority = item.priority || 'medium';
-                            const category = item.category ? item.category.replace(/_/g, ' ') : null;
+                          <>
+                            {selectedCategory && (
+                              <div className="flex items-center gap-2 mb-3">
+                                <Filter size={12} className="text-[var(--accent-lavender)]" />
+                                <span className="text-xs text-[var(--text-muted)]">Filtered by: <span className="text-[var(--accent-lavender)] font-medium capitalize">{selectedCategory.replace(/_/g, ' ')}</span></span>
+                                <button onClick={() => setSelectedCategory(null)} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] ml-auto underline cursor-pointer transition-colors">Clear</button>
+                              </div>
+                            )}
+                            <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin">
+                              {filtered.slice(0, 20).map((item, i) => {
+                                const skill = typeof item === 'string' ? item : item.skill;
+                                const likelihood = item.likelihood != null
+                                  ? Math.round((item.likelihood <= 1 ? item.likelihood * 100 : item.likelihood))
+                                  : null;
+                                const priority = item.priority || 'medium';
+                                const category = item.category ? item.category.replace(/_/g, ' ') : null;
 
-                            const priorityConfig = {
-                              high:   { label: 'HIGH',   bar: 'bg-[var(--accent-coral)]',   badge: 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border-[var(--accent-coral)]/20' },
-                              medium: { label: 'MED',    bar: 'bg-[var(--accent-warm)]',    badge: 'bg-[var(--accent-warm-dim)]  text-[var(--accent-warm)]  border-[var(--accent-warm)]/20'  },
-                              low:    { label: 'LOW',    bar: 'bg-[var(--accent-teal)]',    badge: 'bg-[var(--accent-teal-dim)]  text-[var(--accent-teal)]  border-[var(--accent-teal)]/20'  },
-                            };
-                            const cfg = priorityConfig[priority] || priorityConfig.medium;
+                                const priorityConfig = {
+                                  high: { label: 'HIGH', bar: 'bg-[var(--accent-coral)]', badge: 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border-[var(--accent-coral)]/20' },
+                                  medium: { label: 'MED', bar: 'bg-[var(--accent-warm)]', badge: 'bg-[var(--accent-warm-dim)]  text-[var(--accent-warm)]  border-[var(--accent-warm)]/20' },
+                                  low: { label: 'LOW', bar: 'bg-[var(--accent-teal)]', badge: 'bg-[var(--accent-teal-dim)]  text-[var(--accent-teal)]  border-[var(--accent-teal)]/20' },
+                                };
+                                const cfg = priorityConfig[priority] || priorityConfig.medium;
 
-                            return (
-                              <motion.div
-                                key={skill}
-                                initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: i * 0.04 }}
-                                className="group flex items-center gap-3 bg-[var(--bg-deep)]/50 border border-[var(--border-subtle)] rounded-xl px-4 py-3 hover:border-[var(--border-hover)] transition-colors duration-200"
-                              >
-                                {/* Rank number */}
-                                <span className="text-[10px] font-bold text-[var(--text-muted)] w-4 shrink-0 text-center">
-                                  {i + 1}
-                                </span>
-
-                                {/* Skill name + category */}
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors truncate">
-                                    {skill}
-                                  </p>
-                                  {category && (
-                                    <span className="text-[10px] text-[var(--text-muted)] capitalize">{category}</span>
-                                  )}
-                                </div>
-
-                                {/* Mini likelihood bar */}
-                                {likelihood != null && (
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <div className="w-16 h-1.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
-                                      <motion.div
-                                        className={`h-full rounded-full ${cfg.bar}`}
-                                        initial={{ width: 0 }}
-                                        animate={{ width: `${likelihood}%` }}
-                                        transition={{ duration: 0.7, ease: 'easeOut', delay: 0.1 + i * 0.04 }}
-                                      />
-                                    </div>
-                                    <span className="text-[10px] font-medium text-[var(--text-muted)] w-7 text-right">
-                                      {likelihood}%
+                                return (
+                                  <motion.div
+                                    key={skill}
+                                    initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: i * 0.04 }}
+                                    className="group flex items-center gap-3 bg-[var(--bg-deep)]/50 border border-[var(--border-subtle)] rounded-xl px-4 py-3 hover:border-[var(--border-hover)] transition-colors duration-200"
+                                  >
+                                    {/* Rank number */}
+                                    <span className="text-[10px] font-bold text-[var(--text-muted)] w-4 shrink-0 text-center">
+                                      {i + 1}
                                     </span>
-                                  </div>
-                                )}
 
-                                {/* Priority badge */}
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${cfg.badge} shrink-0`}>
-                                  {cfg.label}
-                                </span>
-                              </motion.div>
-                            );
-                          })}
-                        </div>
-                        </>
+                                    {/* Skill name + category */}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors truncate">
+                                        {skill}
+                                      </p>
+                                      {category && (
+                                        <span className="text-[10px] text-[var(--text-muted)] capitalize">{category}</span>
+                                      )}
+                                    </div>
+
+                                    {/* Mini likelihood bar */}
+                                    {likelihood != null && (
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <div className="w-16 h-1.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+                                          <motion.div
+                                            className={`h-full rounded-full ${cfg.bar}`}
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${likelihood}%` }}
+                                            transition={{ duration: 0.7, ease: 'easeOut', delay: 0.1 + i * 0.04 }}
+                                          />
+                                        </div>
+                                        <span className="text-[10px] font-medium text-[var(--text-muted)] w-7 text-right">
+                                          {likelihood}%
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {/* Priority badge */}
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${cfg.badge} shrink-0`}>
+                                      {cfg.label}
+                                    </span>
+                                  </motion.div>
+                                );
+                              })}
+                            </div>
+                          </>
                         );
                       })() : (
                         /* Fallback: plain chips when ranked data not available */
@@ -399,193 +497,191 @@ export default function DashboardPage() {
                 {/* ===== SKILL GAP VISUALIZATION ===== */}
                 {((data.skill_categories && Object.keys(data.skill_categories).length > 0) ||
                   (data.missing_skills_ranked && data.missing_skills_ranked.length > 0)) && (
-                  <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay overflow-hidden relative">
-                    <div className="relative z-10">
-                      {/* Header + Toggle */}
-                      <div className="flex items-center justify-between mb-8">
-                        <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-[var(--accent-lavender-dim)] flex items-center justify-center">
-                            <Activity size={18} className="text-[var(--accent-lavender)]" />
+                    <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay overflow-hidden relative">
+                      <div className="relative z-10">
+                        {/* Header + Toggle */}
+                        <div className="flex items-center justify-between mb-8">
+                          <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-[var(--accent-lavender-dim)] flex items-center justify-center">
+                              <Activity size={18} className="text-[var(--accent-lavender)]" />
+                            </div>
+                            Skill Gap Analysis
+                          </h2>
+                          {/* Chart type toggle */}
+                          <div className="flex items-center gap-1 p-1 bg-[var(--bg-deep)] border border-[var(--border-subtle)] rounded-lg">
+                            <button
+                              onClick={() => setChartView("radar")}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer ${chartView === "radar"
+                                  ? "bg-[var(--accent-lavender-dim)] text-[var(--accent-lavender)] border border-[var(--accent-lavender)]/20"
+                                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                }`}
+                            >
+                              <Activity size={12} />
+                              Radar
+                            </button>
+                            <button
+                              onClick={() => setChartView("bar")}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer ${chartView === "bar"
+                                  ? "bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] border border-[var(--accent-warm)]/20"
+                                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                }`}
+                            >
+                              <BarChart2 size={12} />
+                              Bar
+                            </button>
                           </div>
-                          Skill Gap Analysis
-                        </h2>
-                        {/* Chart type toggle */}
-                        <div className="flex items-center gap-1 p-1 bg-[var(--bg-deep)] border border-[var(--border-subtle)] rounded-lg">
-                          <button
-                            onClick={() => setChartView("radar")}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer ${
-                              chartView === "radar"
-                                ? "bg-[var(--accent-lavender-dim)] text-[var(--accent-lavender)] border border-[var(--accent-lavender)]/20"
-                                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                            }`}
-                          >
-                            <Activity size={12} />
-                            Radar
-                          </button>
-                          <button
-                            onClick={() => setChartView("bar")}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer ${
-                              chartView === "bar"
-                                ? "bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] border border-[var(--accent-warm)]/20"
-                                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                            }`}
-                          >
-                            <BarChart2 size={12} />
-                            Bar
-                          </button>
                         </div>
+
+                        {/* ── Radar Chart: skill coverage per category ── */}
+                        {chartView === "radar" && (() => {
+                          const cats = data.skill_categories || {};
+                          const radarData = Object.entries(cats).map(([cat, skills]) => ({
+                            category: cat.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+                            count: Array.isArray(skills) ? skills.length : 0,
+                            fullMark: Math.max(6, ...Object.values(cats).map(s => Array.isArray(s) ? s.length : 0)),
+                          }));
+                          if (radarData.length === 0) return (
+                            <p className="text-center text-sm text-[var(--text-muted)] py-12">No skill categories available yet.</p>
+                          );
+                          return (
+                            <>
+                              <p className="text-xs text-[var(--text-muted)] mb-6">Coverage of detected skills across tech domains</p>
+                              <div className="h-72 w-full">
+                                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                                  <RadarChart data={radarData} margin={{ top: 10, right: 30, left: 30, bottom: 10 }}>
+                                    <PolarGrid stroke="var(--border-subtle)" />
+                                    <PolarAngleAxis
+                                      dataKey="category"
+                                      tick={{ fill: "var(--text-muted)", fontSize: 11 }}
+                                    />
+                                    <PolarRadiusAxis
+                                      angle={30}
+                                      domain={[0, "auto"]}
+                                      tick={{ fill: "var(--text-muted)", fontSize: 10 }}
+                                      tickCount={4}
+                                    />
+                                    <Radar
+                                      name="Skills"
+                                      dataKey="count"
+                                      stroke="var(--accent-lavender)"
+                                      fill="var(--accent-lavender)"
+                                      fillOpacity={0.25}
+                                      strokeWidth={2}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{
+                                        backgroundColor: "var(--bg-surface)",
+                                        borderColor: "var(--border-subtle)",
+                                        color: "var(--text-primary)",
+                                        borderRadius: "10px",
+                                        fontSize: "12px",
+                                        boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
+                                      }}
+                                      itemStyle={{ color: "var(--text-primary)" }}
+                                      labelStyle={{ color: "var(--text-muted)" }}
+                                      formatter={(value, name, props) => [
+                                        `${value} skill${value !== 1 ? "s" : ""}`,
+                                        props.payload.category,
+                                      ]}
+                                    />
+                                  </RadarChart>
+                                </ResponsiveContainer>
+                              </div>
+                              {/* Category chips */}
+                              <div className="flex flex-wrap gap-2 mt-6">
+                                {Object.entries(cats).filter(([, s]) => Array.isArray(s) && s.length > 0).map(([cat, skills]) => (
+                                  <span key={cat} className="flex items-center gap-1.5 px-2.5 py-1 bg-[var(--accent-lavender-dim)] border border-[var(--accent-lavender)]/20 text-[var(--accent-lavender)] text-xs rounded-md font-medium">
+                                    {cat.replace(/_/g, " ")}
+                                    <span className="text-[var(--accent-lavender)]/60">·</span>
+                                    {skills.length}
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
+
+                        {/* ── Bar Chart: top missing skills by likelihood ── */}
+                        {chartView === "bar" && (() => {
+                          const ranked = (data.missing_skills_ranked || []).slice(0, 10);
+                          if (ranked.length === 0) return (
+                            <p className="text-center text-sm text-[var(--text-muted)] py-12">No ranked missing skills yet.</p>
+                          );
+                          const barData = ranked.map(s => ({
+                            name: s.skill,
+                            likelihood: Math.round((s.likelihood <= 1 ? s.likelihood * 100 : s.likelihood)),
+                            priority: s.priority,
+                            category: s.category,
+                          }));
+                          const barColor = (priority) =>
+                            priority === "high" ? "var(--accent-teal)" :
+                              priority === "medium" ? "var(--accent-warm)" :
+                                "var(--accent-coral)";
+                          return (
+                            <>
+                              <p className="text-xs text-[var(--text-muted)] mb-6">Top missing skills ranked by LSTM likelihood score</p>
+                              <div className="h-72 w-full">
+                                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                                  <BarChart data={barData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" horizontal={false} />
+                                    <XAxis
+                                      type="number"
+                                      domain={[0, 100]}
+                                      tickFormatter={v => `${v}%`}
+                                      stroke="var(--text-muted)"
+                                      fontSize={11}
+                                      tickLine={false}
+                                      axisLine={false}
+                                    />
+                                    <YAxis
+                                      type="category"
+                                      dataKey="name"
+                                      width={90}
+                                      stroke="var(--text-muted)"
+                                      fontSize={11}
+                                      tickLine={false}
+                                      axisLine={false}
+                                    />
+                                    <Tooltip
+                                      cursor={{ fill: "var(--bg-elevated)" }}
+                                      contentStyle={{
+                                        backgroundColor: "var(--bg-surface)",
+                                        borderColor: "var(--border-subtle)",
+                                        color: "var(--text-primary)",
+                                        borderRadius: "10px",
+                                        fontSize: "12px",
+                                        boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
+                                      }}
+                                      itemStyle={{ color: "var(--text-primary)" }}
+                                      labelStyle={{ color: "var(--text-muted)" }}
+                                      formatter={(value, name, props) => [
+                                        `${value}% likelihood`,
+                                        `${props.payload.category} · ${props.payload.priority} priority`,
+                                      ]}
+                                    />
+                                    <Bar dataKey="likelihood" radius={[0, 6, 6, 0]} maxBarSize={18}>
+                                      {barData.map((entry, i) => (
+                                        <Cell key={i} fill={barColor(entry.priority)} />
+                                      ))}
+                                    </Bar>
+                                  </BarChart>
+                                </ResponsiveContainer>
+                              </div>
+                              {/* Priority legend */}
+                              <div className="flex items-center gap-4 mt-6">
+                                {[["high", "var(--accent-teal)"], ["medium", "var(--accent-warm)"], ["low", "var(--accent-coral)"]].map(([p, c]) => (
+                                  <div key={p} className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                                    <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: c }} />
+                                    {p.charAt(0).toUpperCase() + p.slice(1)} priority
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
-
-                      {/* ── Radar Chart: skill coverage per category ── */}
-                      {chartView === "radar" && (() => {
-                        const cats = data.skill_categories || {};
-                        const radarData = Object.entries(cats).map(([cat, skills]) => ({
-                          category: cat.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-                          count: Array.isArray(skills) ? skills.length : 0,
-                          fullMark: Math.max(6, ...Object.values(cats).map(s => Array.isArray(s) ? s.length : 0)),
-                        }));
-                        if (radarData.length === 0) return (
-                          <p className="text-center text-sm text-[var(--text-muted)] py-12">No skill categories available yet.</p>
-                        );
-                        return (
-                          <>
-                            <p className="text-xs text-[var(--text-muted)] mb-6">Coverage of detected skills across tech domains</p>
-                            <div className="h-72 w-full">
-                              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                                <RadarChart data={radarData} margin={{ top: 10, right: 30, left: 30, bottom: 10 }}>
-                                  <PolarGrid stroke="var(--border-subtle)" />
-                                  <PolarAngleAxis
-                                    dataKey="category"
-                                    tick={{ fill: "var(--text-muted)", fontSize: 11 }}
-                                  />
-                                  <PolarRadiusAxis
-                                    angle={30}
-                                    domain={[0, "auto"]}
-                                    tick={{ fill: "var(--text-muted)", fontSize: 10 }}
-                                    tickCount={4}
-                                  />
-                                  <Radar
-                                    name="Skills"
-                                    dataKey="count"
-                                    stroke="var(--accent-lavender)"
-                                    fill="var(--accent-lavender)"
-                                    fillOpacity={0.25}
-                                    strokeWidth={2}
-                                  />
-                                  <Tooltip
-                                    contentStyle={{
-                                      backgroundColor: "var(--bg-surface)",
-                                      borderColor: "var(--border-subtle)",
-                                      color: "var(--text-primary)",
-                                      borderRadius: "10px",
-                                      fontSize: "12px",
-                                      boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
-                                    }}
-                                    itemStyle={{ color: "var(--text-primary)" }}
-                                    labelStyle={{ color: "var(--text-muted)" }}
-                                    formatter={(value, name, props) => [
-                                      `${value} skill${value !== 1 ? "s" : ""}`,
-                                      props.payload.category,
-                                    ]}
-                                  />
-                                </RadarChart>
-                              </ResponsiveContainer>
-                            </div>
-                            {/* Category chips */}
-                            <div className="flex flex-wrap gap-2 mt-6">
-                              {Object.entries(cats).filter(([, s]) => Array.isArray(s) && s.length > 0).map(([cat, skills]) => (
-                                <span key={cat} className="flex items-center gap-1.5 px-2.5 py-1 bg-[var(--accent-lavender-dim)] border border-[var(--accent-lavender)]/20 text-[var(--accent-lavender)] text-xs rounded-md font-medium">
-                                  {cat.replace(/_/g, " ")}
-                                  <span className="text-[var(--accent-lavender)]/60">·</span>
-                                  {skills.length}
-                                </span>
-                              ))}
-                            </div>
-                          </>
-                        );
-                      })()}
-
-                      {/* ── Bar Chart: top missing skills by likelihood ── */}
-                      {chartView === "bar" && (() => {
-                        const ranked = (data.missing_skills_ranked || []).slice(0, 10);
-                        if (ranked.length === 0) return (
-                          <p className="text-center text-sm text-[var(--text-muted)] py-12">No ranked missing skills yet.</p>
-                        );
-                        const barData = ranked.map(s => ({
-                          name: s.skill,
-                          likelihood: Math.round((s.likelihood <= 1 ? s.likelihood * 100 : s.likelihood)),
-                          priority: s.priority,
-                          category: s.category,
-                        }));
-                        const barColor = (priority) =>
-                          priority === "high"   ? "var(--accent-teal)" :
-                          priority === "medium" ? "var(--accent-warm)" :
-                                                  "var(--accent-coral)";
-                        return (
-                          <>
-                            <p className="text-xs text-[var(--text-muted)] mb-6">Top missing skills ranked by LSTM likelihood score</p>
-                            <div className="h-72 w-full">
-                              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                                <BarChart data={barData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" horizontal={false} />
-                                  <XAxis
-                                    type="number"
-                                    domain={[0, 100]}
-                                    tickFormatter={v => `${v}%`}
-                                    stroke="var(--text-muted)"
-                                    fontSize={11}
-                                    tickLine={false}
-                                    axisLine={false}
-                                  />
-                                  <YAxis
-                                    type="category"
-                                    dataKey="name"
-                                    width={90}
-                                    stroke="var(--text-muted)"
-                                    fontSize={11}
-                                    tickLine={false}
-                                    axisLine={false}
-                                  />
-                                  <Tooltip
-                                    cursor={{ fill: "var(--bg-elevated)" }}
-                                    contentStyle={{
-                                      backgroundColor: "var(--bg-surface)",
-                                      borderColor: "var(--border-subtle)",
-                                      color: "var(--text-primary)",
-                                      borderRadius: "10px",
-                                      fontSize: "12px",
-                                      boxShadow: "0 8px 30px rgba(0,0,0,0.3)",
-                                    }}
-                                    itemStyle={{ color: "var(--text-primary)" }}
-                                    labelStyle={{ color: "var(--text-muted)" }}
-                                    formatter={(value, name, props) => [
-                                      `${value}% likelihood`,
-                                      `${props.payload.category} · ${props.payload.priority} priority`,
-                                    ]}
-                                  />
-                                  <Bar dataKey="likelihood" radius={[0, 6, 6, 0]} maxBarSize={18}>
-                                    {barData.map((entry, i) => (
-                                      <Cell key={i} fill={barColor(entry.priority)} />
-                                    ))}
-                                  </Bar>
-                                </BarChart>
-                              </ResponsiveContainer>
-                            </div>
-                            {/* Priority legend */}
-                            <div className="flex items-center gap-4 mt-6">
-                              {[["high","var(--accent-teal)"],["medium","var(--accent-warm)"],["low","var(--accent-coral)"]].map(([p, c]) => (
-                                <div key={p} className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                                  <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: c }} />
-                                  {p.charAt(0).toUpperCase() + p.slice(1)} priority
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </motion.div>
-                )}
+                    </motion.div>
+                  )}
 
                 {/* Roadmap */}
                 <motion.div {...fadeUp(0.2)} className="glass-card p-8 noise-overlay overflow-hidden relative">
@@ -677,45 +773,112 @@ export default function DashboardPage() {
                           <h3 className="text-xl font-bold text-[var(--text-primary)] tracking-tight leading-tight w-2/3">
                             {trueMlPrediction}
                           </h3>
-                          <span className={`text-lg font-bold ${
-                            trueMlConfidence >= 80 ? 'text-[var(--accent-teal)]' : 
-                            trueMlConfidence >= 60 ? 'text-[var(--accent-warm)]' : 
-                            'text-[var(--accent-coral)]'
-                          }`}>
+                          <span className={`text-lg font-bold ${trueMlConfidence >= 80 ? 'text-[var(--accent-teal)]' :
+                              trueMlConfidence >= 60 ? 'text-[var(--accent-warm)]' :
+                                'text-[var(--accent-coral)]'
+                            }`}>
                             {Math.round(trueMlConfidence)}%
                           </span>
                         </div>
 
                         {/* Confidence Bar */}
                         <div className="h-1.5 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden border border-[var(--border-subtle)] mb-6">
-                          <motion.div 
-                            className={`h-full rounded-full ${
-                              trueMlConfidence >= 80 ? 'bg-[var(--accent-teal)]' : 
-                              trueMlConfidence >= 60 ? 'bg-[var(--accent-warm)]' : 
-                              'bg-[var(--accent-coral)]'
-                            }`}
+                          <motion.div
+                            className={`h-full rounded-full ${trueMlConfidence >= 80 ? 'bg-[var(--accent-teal)]' :
+                                trueMlConfidence >= 60 ? 'bg-[var(--accent-warm)]' :
+                                  'bg-[var(--accent-coral)]'
+                              }`}
                             initial={{ width: '0%' }}
                             animate={{ width: `${trueMlConfidence}%` }}
                             transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
                           />
                         </div>
 
-                        {/* Alternative Roles */}
-                        {trueMlAlternatives && trueMlAlternatives.length > 0 && (
-                           <div>
-                             <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mb-3">Alternative Matches</p>
-                             <div className="flex flex-wrap gap-2">
-                               {trueMlAlternatives.map((alt, i) => {
-                                 const roleName = typeof alt === 'string' ? alt : alt.role;
-                                 return (
-                                   <span key={i} className="px-2.5 py-1 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs rounded-md font-medium hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-colors cursor-default">
-                                     {roleName}
-                                   </span>
-                                 );
-                               })}
-                             </div>
-                           </div>
+                        {/* Top Predictive Skills — "Why this role?" */}
+                        {data.top_predictive_skills?.length > 0 && (
+                          <div className="mb-6">
+                            <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mb-2.5">Why this role?</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {data.top_predictive_skills.map((skill, i) => (
+                                <motion.span
+                                  key={skill}
+                                  initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.8 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ delay: 0.3 + i * 0.05 }}
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal)]/15 text-[10px] rounded-md font-medium"
+                                >
+                                  <span className="w-1 h-1 rounded-full bg-[var(--accent-teal)]" />
+                                  {skill}
+                                </motion.span>
+                              ))}
+                            </div>
+                          </div>
                         )}
+
+                        {/* Alternative Roles with probability bars — clickable for swap */}
+                        {trueMlAlternatives && trueMlAlternatives.length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mb-3">
+                              Click to switch role
+                            </p>
+                            <div className="space-y-2">
+                              {trueMlAlternatives.slice(0, 3).map((alt, i) => {
+                                const roleName = typeof alt === 'string' ? alt : alt.role;
+                                const altConf = typeof alt === 'string' ? null : normalizeConfidence(alt.confidence);
+                                const probConf = data.role_probabilities?.[roleName]
+                                  ? normalizeConfidence(data.role_probabilities[roleName])
+                                  : altConf;
+                                return (
+                                  <motion.button
+                                    key={i}
+                                    initial={prefersReducedMotion ? false : { opacity: 0, x: -6 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.4 + i * 0.08 }}
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.97 }}
+                                    disabled={isSwapping}
+                                    onClick={() => handleRoleSwap(roleName)}
+                                    className="flex items-center gap-2.5 w-full text-left px-3 py-2 bg-[var(--bg-deep)]/50 border border-[var(--border-subtle)] rounded-lg hover:border-[var(--accent-warm)]/40 hover:bg-[var(--accent-warm-dim)] transition-all duration-200 cursor-pointer group disabled:opacity-50 disabled:cursor-wait"
+                                  >
+                                    <RefreshCw size={10} className="text-[var(--text-muted)] group-hover:text-[var(--accent-warm)] transition-colors shrink-0" />
+                                    <span className="text-xs text-[var(--text-secondary)] font-medium flex-1 truncate group-hover:text-[var(--text-primary)] transition-colors">
+                                      {roleName}
+                                    </span>
+                                    {probConf != null && (
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        <div className="w-12 h-1 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+                                          <motion.div
+                                            className="h-full rounded-full bg-[var(--text-muted)] group-hover:bg-[var(--accent-warm)] transition-colors"
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${probConf}%` }}
+                                            transition={{ duration: 0.6, ease: 'easeOut', delay: 0.5 + i * 0.08 }}
+                                          />
+                                        </div>
+                                        <span className="text-[10px] text-[var(--text-muted)] font-medium w-6 text-right">
+                                          {Math.round(probConf)}%
+                                        </span>
+                                      </div>
+                                    )}
+                                  </motion.button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Swap error */}
+                        <AnimatePresence>
+                          {swapError && (
+                            <motion.p
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="text-xs text-[var(--accent-coral)] mt-3"
+                            >
+                              {swapError}
+                            </motion.p>
+                          )}
+                        </AnimatePresence>
                       </>
                     ) : (
                       <div className="text-center py-4">
@@ -724,6 +887,22 @@ export default function DashboardPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Swap loading overlay */}
+                  <AnimatePresence>
+                    {isSwapping && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[var(--bg-deep)]/80 backdrop-blur-sm rounded-2xl"
+                      >
+                        <Loader2 size={28} className="animate-spin text-[var(--accent-warm)] mb-3" />
+                        <p className="text-sm font-medium text-[var(--text-primary)]">Switching role...</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-1">Re-analyzing with new target</p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
 
                 {/* Readiness Score */}
@@ -795,16 +974,16 @@ export default function DashboardPage() {
                 {data.skill_categories && Object.keys(data.skill_categories).length > 0 && (() => {
                   const cats = data.skill_categories;
                   const CATEGORY_COLORS = {
-                    languages:   'var(--accent-teal)',
-                    frontend:    'var(--accent-warm)',
-                    backend:     'var(--accent-coral)',
-                    databases:   'var(--accent-lavender)',
-                    cloud_devops:'#6bb5e0',
-                    ml_ai:       '#e06bb5',
-                    data:        '#b5e06b',
-                    mlops:       '#e0b56b',
-                    security:    '#6be0b5',
-                    general:     'var(--text-muted)',
+                    languages: 'var(--accent-teal)',
+                    frontend: 'var(--accent-warm)',
+                    backend: 'var(--accent-coral)',
+                    databases: 'var(--accent-lavender)',
+                    cloud_devops: '#6bb5e0',
+                    ml_ai: '#e06bb5',
+                    data: '#b5e06b',
+                    mlops: '#e0b56b',
+                    security: '#6be0b5',
+                    general: 'var(--text-muted)',
                   };
                   const donutData = Object.entries(cats)
                     .filter(([, skills]) => Array.isArray(skills) && skills.length > 0)
@@ -883,11 +1062,10 @@ export default function DashboardPage() {
                             <button
                               key={d.rawCat}
                               onClick={() => setSelectedCategory(prev => prev === d.rawCat ? null : d.rawCat)}
-                              className={`flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs transition-colors duration-200 cursor-pointer ${
-                                selectedCategory === d.rawCat
+                              className={`flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs transition-colors duration-200 cursor-pointer ${selectedCategory === d.rawCat
                                   ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)]'
                                   : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                              }`}
+                                }`}
                             >
                               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.fill, opacity: selectedCategory && selectedCategory !== d.rawCat ? 0.3 : 1 }} />
                               <span className="flex-1 truncate">{d.name}</span>
@@ -935,11 +1113,10 @@ export default function DashboardPage() {
                                   {q.category}
                                 </span>
                                 {q.difficulty && (
-                                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${
-                                    q.difficulty.toLowerCase() === 'hard' ? 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)]' :
-                                    q.difficulty.toLowerCase() === 'medium' ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)]' :
-                                    'bg-[var(--accent-teal-dim)] text-[var(--accent-teal)]'
-                                  }`}>
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${q.difficulty.toLowerCase() === 'hard' ? 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)]' :
+                                      q.difficulty.toLowerCase() === 'medium' ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)]' :
+                                        'bg-[var(--accent-teal-dim)] text-[var(--accent-teal)]'
+                                    }`}>
                                     {q.difficulty}
                                   </span>
                                 )}
