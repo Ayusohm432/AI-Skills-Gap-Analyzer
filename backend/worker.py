@@ -48,6 +48,7 @@ from nlp.engine import (
     generate_interview_questions,
     categorize_skills,          # Step 6b – KMeans-backed, rule-based fallback
 )
+from services.ai_interview_service import generate_ai_interview_questions
 
 logger = logging.getLogger("worker")
 
@@ -281,9 +282,22 @@ async def run_analysis(
         await _set_status(oid, "processing", step=7)
         roadmap = generate_roadmap(missing_skills_ranked)
 
-        # ── Step 8: Interview question generation ─────────────────────
+        # ── Step 8: Interview question generation (AI → static bank fallback) ──
         await _set_status(oid, "processing", step=8)
-        interview_qs = generate_interview_questions(missing_skills, target_role)
+        interview_qs = await generate_ai_interview_questions(
+            role=target_role or "General Developer",
+            identified_skills=identified_skills,
+            missing_skills=missing_skills,
+            readiness_score=readiness_score,
+            seniority=seniority,
+        )
+        if not interview_qs:
+            # Fallback: use static question bank (no GEMINI_API_KEY or API error)
+            logger.warning(
+                "[job=%s] AI interview generation unavailable – using static question bank",
+                job_id,
+            )
+            interview_qs = generate_interview_questions(missing_skills, target_role)
 
         # ── Step 9: MongoDB storage ───────────────────────────────────
         await _set_status(oid, "processing", step=9)
