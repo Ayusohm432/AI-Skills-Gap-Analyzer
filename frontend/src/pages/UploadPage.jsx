@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
-import { Upload, FileCheck, ChevronDown, Loader2, AlertCircle, Briefcase } from "lucide-react";
+import { Upload, FileCheck, ChevronDown, Loader2, AlertCircle, Briefcase, CheckCircle2 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
@@ -26,6 +26,26 @@ export default function UploadPage() {
     "Cyber Security Analyst"
   ]);
   const navigate = useNavigate();
+  const pollRef = useRef(null); // setInterval ID for cleanup
+
+  // Pipeline steps mapped to backend status flow
+  const PIPELINE_STEPS = [
+    { key: 'upload',   label: 'Uploading' },
+    { key: 'extract',  label: 'Extracting' },
+    { key: 'analyze',  label: 'Analyzing' },
+    { key: 'complete', label: 'Complete' },
+  ];
+  const [pipelineStep, setPipelineStep] = useState(-1); // -1 = not started
+
+  // Cleanup polling on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const fetchRoles = async () => {
@@ -101,6 +121,7 @@ export default function UploadPage() {
     setLoading(true);
     setUploadProgress(0);
     setUploadStatus("Preparing document...");
+    setPipelineStep(0); // Uploading
     setError(null);
 
     const formData = new FormData();
@@ -115,7 +136,7 @@ export default function UploadPage() {
 
     try {
       // ── Step 1: Submit job (expect 202 + job_id) ──────────────────
-      setUploadProgress(10);
+      setUploadProgress(15);
       setUploadStatus("Uploading resume...");
 
       const submitRes = await secureFetch('/api/v1/analyze/resume', {
@@ -130,51 +151,56 @@ export default function UploadPage() {
 
       const { job_id } = await submitRes.json();
 
-      setUploadProgress(25);
-      setUploadStatus("Analysis queued — extracting text...");
+      setPipelineStep(1); // Extracting
+      setUploadProgress(30);
+      setUploadStatus("Extracting text from resume...");
 
-      // ── Step 2: Poll every 2 s until completed / failed ───────────
-      const statusMessages = [
-        "Extracting text from resume...",
-        "Running NLP skill extraction...",
-        "Matching against role requirements...",
-        "Predicting missing skills...",
-        "Generating learning roadmap...",
-        "Finalizing analysis...",
-      ];
-      let msgIdx = 0;
-      let pollProgress = 30;
-
+      // ── Step 2: Poll every 2s until completed / failed ────────────
       const result = await new Promise((resolve, reject) => {
-        const interval = setInterval(async () => {
+        let pollProgress = 35;
+
+        pollRef.current = setInterval(async () => {
           try {
             const pollRes = await secureFetch(`/api/v1/jobs/${job_id}`);
             if (!pollRes.ok) {
-              clearInterval(interval);
+              clearInterval(pollRef.current);
+              pollRef.current = null;
               reject(new Error(`Poll error: ${pollRes.status}`));
               return;
             }
 
             const jobData = await pollRes.json();
 
-            // Advance progress + message
-            if (pollProgress < 90) {
-              pollProgress += 10;
-              setUploadProgress(pollProgress);
+            // Map backend status → pipeline steps
+            if (jobData.status === "processing") {
+              if (pollProgress < 55) {
+                setPipelineStep(1); // Extracting
+                setUploadStatus("Extracting text from resume...");
+              } else {
+                setPipelineStep(2); // Analyzing
+                setUploadStatus("Running ML analysis & predictions...");
+              }
             }
-            setUploadStatus(statusMessages[msgIdx % statusMessages.length]);
-            msgIdx++;
+
+            if (pollProgress < 90) {
+              pollProgress += 8;
+              setUploadProgress(Math.min(pollProgress, 92));
+            }
 
             if (jobData.status === "completed") {
-              clearInterval(interval);
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setPipelineStep(3); // Complete
               resolve(jobData.result);
             } else if (jobData.status === "failed") {
-              clearInterval(interval);
+              clearInterval(pollRef.current);
+              pollRef.current = null;
               reject(new Error(jobData.error || "Analysis failed on the server."));
             }
             // "pending" / "processing" → keep polling
           } catch (pollErr) {
-            clearInterval(interval);
+            clearInterval(pollRef.current);
+            pollRef.current = null;
             reject(pollErr);
           }
         }, 2000);
@@ -184,12 +210,13 @@ export default function UploadPage() {
       setUploadProgress(100);
       setUploadStatus("Analysis Complete!");
       localStorage.setItem("analysisResult", JSON.stringify(result));
-      setTimeout(() => navigate("/dashboard"), 600);
+      setTimeout(() => navigate("/dashboard"), 800);
 
     } catch (err) {
       console.error(err);
       setError(err.message || "Analysis failed. Please make sure the backend is running and the file is readable.");
       setLoading(false);
+      setPipelineStep(-1);
     }
   };
 
@@ -390,17 +417,71 @@ export default function UploadPage() {
                         exit={{ opacity: 0, height: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="pt-2 pb-1">
+                        <div className="pt-4 pb-1">
+                          {/* Step-by-step pipeline tracker */}
+                          <div className="flex items-center justify-between mb-5">
+                            {PIPELINE_STEPS.map((step, idx) => {
+                              const isCompleted = pipelineStep > idx;
+                              const isActive = pipelineStep === idx;
+                              return (
+                                <React.Fragment key={step.key}>
+                                  <div className="flex flex-col items-center gap-1.5 flex-1">
+                                    {/* Step icon */}
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                                      isCompleted
+                                        ? 'bg-[var(--accent-teal)] text-[var(--bg-deep)]'
+                                        : isActive
+                                          ? 'bg-[var(--accent-warm-dim)] border-2 border-[var(--accent-warm)] text-[var(--accent-warm)]'
+                                          : 'bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)]'
+                                    }`}>
+                                      {isCompleted ? (
+                                        <CheckCircle2 size={16} />
+                                      ) : isActive ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                      ) : (
+                                        <span className="text-[10px] font-bold">{idx + 1}</span>
+                                      )}
+                                    </div>
+                                    {/* Step label */}
+                                    <span className={`text-[10px] font-medium transition-colors duration-200 ${
+                                      isCompleted
+                                        ? 'text-[var(--accent-teal)]'
+                                        : isActive
+                                          ? 'text-[var(--accent-warm)]'
+                                          : 'text-[var(--text-muted)]'
+                                    }`}>
+                                      {step.label}
+                                    </span>
+                                  </div>
+                                  {/* Connector line */}
+                                  {idx < PIPELINE_STEPS.length - 1 && (
+                                    <div className="flex-1 max-w-[40px] h-px mx-1 mt-[-18px]">
+                                      <div className={`h-full rounded-full transition-all duration-500 ${
+                                        pipelineStep > idx
+                                          ? 'bg-[var(--accent-teal)]'
+                                          : 'bg-[var(--border-subtle)]'
+                                      }`} />
+                                    </div>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                          </div>
+
+                          {/* Status text + percentage */}
                           <div className="flex justify-between text-xs font-medium text-[var(--text-secondary)] mb-2">
                             <span>{uploadStatus}</span>
                             <span>{Math.round(uploadProgress)}%</span>
                           </div>
+                          {/* Progress bar */}
                           <div className="h-1.5 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
                             <motion.div 
-                              className="h-full bg-[var(--accent-warm)] rounded-full"
+                              className={`h-full rounded-full transition-colors duration-300 ${
+                                pipelineStep >= 3 ? 'bg-[var(--accent-teal)]' : 'bg-[var(--accent-warm)]'
+                              }`}
                               initial={{ width: '0%' }}
                               animate={{ width: `${uploadProgress}%` }}
-                              transition={{ duration: 0.3 }}
+                              transition={{ duration: 0.4, ease: 'easeOut' }}
                             />
                           </div>
                         </div>
