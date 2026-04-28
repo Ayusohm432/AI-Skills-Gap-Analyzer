@@ -1,5 +1,8 @@
 # AI Skill Gap Analyzer — Wiki
 
+> **One-time setup required:** The GitHub Wiki must be initialized before the sync workflow can run.  
+> Go to the **Wiki** tab in this repository, click **Create the first page**, save it, and the `Sync Wiki` GitHub Actions workflow will automatically keep all pages up to date on every push to `main`.
+
 > **"Google Maps for Career Development"**
 
 The AI Skill Gap Analyzer is a full-stack platform that analyzes a candidate's resume (or GitHub profile), compares it against real job requirements, and generates a personalized learning roadmap together with a Job Readiness Score and AI-powered mock interview preparation.
