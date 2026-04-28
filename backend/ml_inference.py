@@ -26,6 +26,11 @@ logger = logging.getLogger("ml_inference")
 MAX_SKILLS = 20   # sequence length fed to LSTM branch A
 EMB_DIM    = 384  # all-MiniLM-L6-v2 embedding dimension
 
+# Minimum role-predictor confidence to trust the ML output.
+# Below this threshold the worker falls back to NLP role matching and the
+# predicted_role field is set to "Auto Detect" in the stored result.
+ROLE_CONFIDENCE_THRESHOLD: float = 0.60
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -89,14 +94,34 @@ def predict_role(
             for i in top_indices
         ]
 
+        confidence = round(float(proba[pred_idx]), 4)
+
+        # ── Confidence threshold gate ────────────────────────────────
+        if confidence < ROLE_CONFIDENCE_THRESHOLD:
+            logger.warning(
+                "predict_role: confidence %.4f < threshold %.2f for role '%s' – "
+                "returning source=low_confidence so worker falls back to NLP",
+                confidence, ROLE_CONFIDENCE_THRESHOLD, role_labels[pred_idx],
+            )
+            return {
+                "predicted_role": role_labels[pred_idx],   # kept for logging
+                "confidence":     confidence,
+                "top_roles":      top_roles,
+                "source":         "low_confidence",
+            }
+
         return {
             "predicted_role": role_labels[pred_idx],
-            "confidence":     round(float(proba[pred_idx]), 4),
+            "confidence":     confidence,
             "top_roles":      top_roles,
             "source":         "ml",
         }
     except Exception as exc:
-        logger.error("predict_role error: %s", exc)
+        logger.error(
+            "predict_role error (%s): %s",
+            type(exc).__name__, exc,
+            exc_info=True,
+        )
         return {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
 
 
@@ -172,7 +197,11 @@ def predict_missing_skills(
             "source":         "ml",
         }
     except Exception as exc:
-        logger.error("predict_missing_skills error: %s", exc)
+        logger.error(
+            "predict_missing_skills error (%s) for role '%s': %s",
+            type(exc).__name__, target_role, exc,
+            exc_info=True,
+        )
         return {"missing_skills": [], "confidences": {}, "source": "fallback"}
 
 

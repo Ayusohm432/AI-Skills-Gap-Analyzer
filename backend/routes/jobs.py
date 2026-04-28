@@ -41,6 +41,7 @@ ALLOWED_MIME   = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/msword",
+    "text/plain",
 }
 
 _DEFAULT_ROLES = [
@@ -113,6 +114,7 @@ async def submit_resume_analysis(
         "status":         "pending",
         "requested_role": role,
         "filename":       resume.filename,
+        "content_type":   content_type,
         "created_at":     now,
         "updated_at":     now,
         "result":         None,
@@ -132,6 +134,8 @@ async def submit_resume_analysis(
         run_analysis,
         job_id=job_id,
         file_bytes=file_bytes,
+        filename=resume.filename or "",
+        content_type=content_type,
         role=role,
         user_id=current_user["id"],
         ml_bundle=ml_bundle,
@@ -184,17 +188,26 @@ async def get_job_status(
     result: AnalysisResult | None = None
     if job["status"] == "completed" and job.get("result"):
         raw = job["result"]
-        result = AnalysisResult(
-            target_role=raw.get("target_role", ""),
-            skills_detected=raw.get("skills_detected", []),
-            skill_confidences=raw.get("skill_confidences", {}),
-            missing_skills=raw.get("missing_skills", []),
-            readiness_score=raw.get("readiness_score", 0.0),
-            roadmap=raw.get("roadmap", []),
-            interview_questions=raw.get("interview_questions", []),
-            ml_role_source=raw.get("ml_role_source"),
-            ml_missing_source=raw.get("ml_missing_source"),
-        )
+        # Use model_validate so every Pydantic field (core + ML enrichment)
+        # is populated automatically; unknown keys are simply ignored.
+        result = AnalysisResult.model_validate({
+            "predicted_role":         raw.get("predicted_role", ""),
+            "skills_detected":        raw.get("skills_detected", []),
+            "skill_confidences":      raw.get("skill_confidences", {}),
+            "missing_skills":         raw.get("missing_skills", []),
+            "readiness_score":        raw.get("readiness_score", 0.0),
+            "roadmap":                raw.get("roadmap", []),
+            "interview_questions":    raw.get("interview_questions", []),
+            # ML enrichment
+            "role_confidence":        raw.get("role_confidence", 0.0),
+            "role_alternatives":      raw.get("role_alternatives", []),
+            "skill_categories":       raw.get("skill_categories", {}),
+            "missing_skills_ranked":  raw.get("missing_skills_ranked", []),
+            "model_version":          raw.get("model_version", "unknown"),
+            # Provenance
+            "ml_role_source":         raw.get("ml_role_source"),
+            "ml_missing_source":      raw.get("ml_missing_source"),
+        })
 
     return JobStatusResponse(
         job_id=job_id,

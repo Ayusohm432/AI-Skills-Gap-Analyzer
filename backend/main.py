@@ -47,6 +47,7 @@ from nlp.engine import (
 from security import get_current_user
 from routes import auth, user
 from routes import jobs
+from routes import interview
 
 # ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
@@ -82,6 +83,10 @@ async def lifespan(app: FastAPI):
     # Index job lookups by user (for polling) + TTL auto-expire after 7 days
     await analysis_jobs_collection.create_index("user_id")
     await analysis_jobs_collection.create_index("created_at", expireAfterSeconds=60 * 60 * 24 * 7)
+    # Indexes on analyses collection for ML-versioned queries and role-based filtering
+    await analyses_collection.create_index("predicted_role")
+    await analyses_collection.create_index("model_version")
+    await analyses_collection.create_index("user_id")
 
     # 3. Load ML models in a thread pool so we don't block the event loop.
     #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
@@ -140,6 +145,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(user.router, prefix="/api/v1/user", tags=["User Profile"])
 app.include_router(jobs.router, prefix="/api/v1", tags=["Resume Analysis"])
+app.include_router(interview.router, prefix="/api/v1", tags=["Interview Prep"])
 
 
 @app.get("/health", tags=["Health"])

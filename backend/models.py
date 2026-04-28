@@ -134,6 +134,20 @@ class UserUpdate(BaseModel):
     )
 
 
+# ── Interview Questions Models ──────────────────────────────────────────────
+
+class InterviewQuestion(BaseModel):
+    question:   str
+    category:   str  = Field(description="technical | behavioral | system design")
+    difficulty: str  = Field(description="easy | medium | hard")
+
+class InterviewQuestionRequest(BaseModel):
+    predicted_role: str = Field(..., description="The target or predicted job role")
+    missing_skills: List[str] = Field(..., description="List of missing skills identified")
+
+class InterviewQuestionResponse(BaseModel):
+    questions: List[InterviewQuestion]
+
 # ── Job / Background-task models ──────────────────────────────────────────────
 
 class RoleAlternative(BaseModel):
@@ -156,7 +170,7 @@ class AnalysisResult(BaseModel):
 
     Core fields
     -----------
-    target_role, skills_detected, missing_skills, readiness_score,
+    predicted_role, skills_detected, missing_skills, readiness_score,
     roadmap, interview_questions
 
     ML-derived enrichment fields
@@ -168,14 +182,14 @@ class AnalysisResult(BaseModel):
     model_version          – version string matching ML_MODEL_VERSION env var
     """
     # ── Core ──────────────────────────────────────────────────────────
-    target_role:          str
+    predicted_role:       str          = Field(description="The ML/NLP-predicted (or user-selected) role")
     skills_detected:      List[str]
     skill_confidences:    dict                     = Field(default_factory=dict,
                                                            description="NLP confidence per detected skill")
     missing_skills:       List[str]
     readiness_score:      float                    = Field(ge=0.0, le=100.0)
     roadmap:              list
-    interview_questions:  List[str]
+    interview_questions:  List[InterviewQuestion]
 
     # ── ML enrichment ─────────────────────────────────────────────────
     role_confidence:       float                   = Field(default=0.0, ge=0.0, le=1.0,
@@ -190,19 +204,41 @@ class AnalysisResult(BaseModel):
                                                            description="ML artifact version used")
 
     # ── Provenance ────────────────────────────────────────────────────
-    ml_role_source:        Optional[str]           = None
-    ml_missing_source:     Optional[str]           = None
+    ml_role_source:        Optional[str]           = Field(
+        default=None,
+        description=(
+            "Origin of the role prediction. "
+            "'ml' = high-confidence Random Forest; "
+            "'low_confidence' = RF below 0.60 threshold, NLP used instead; "
+            "'fallback' = model file missing or exception raised."
+        ),
+    )
+    ml_missing_source:     Optional[str]           = Field(
+        default=None,
+        description=(
+            "Origin of the missing-skills list. "
+            "'ml' = LSTM inference; "
+            "'static_lookup' = LSTM unavailable, rule-based table used; "
+            "'fallback' = LSTM exception or bundle missing."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "target_role": "Data Scientist",
+                "predicted_role": "Data Scientist",
                 "skills_detected": ["Python", "Pandas", "SQL"],
                 "skill_confidences": {"Python": 0.98, "Pandas": 0.91},
                 "missing_skills": ["TensorFlow", "MLOps"],
                 "readiness_score": 72.5,
                 "roadmap": [],
-                "interview_questions": [],
+                "interview_questions": [
+                    {
+                        "question": "Explain the bias-variance tradeoff.",
+                        "category": "technical",
+                        "difficulty": "medium"
+                    }
+                ],
                 "role_confidence": 0.92,
                 "role_alternatives": [
                     {"role": "ML Engineer", "confidence": 0.06},

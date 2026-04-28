@@ -5,9 +5,71 @@ from typing import Any
 
 from nlp.config import NLPConfig
 from nlp.semantic import extract_skills_semantic
-from nlp.pdf_processor import extract_text_from_pdf  # noqa: F401 – re-exported for main.py
+from nlp.pdf_processor import extract_text_from_pdf   # noqa: F401 – re-exported
+from nlp.docx_processor import extract_text_from_docx  # noqa: F401 – re-exported
+from nlp.txt_processor import extract_text_from_txt    # noqa: F401 – re-exported
 
 logger = logging.getLogger(__name__)
+
+# ── MIME-type → file extension mapping used by the dispatcher ─────────────────
+_MIME_TO_EXT: dict[str, str] = {
+    "application/pdf":                                                              "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document":     "docx",
+    "application/msword":                                                           "docx",
+    "text/plain":                                                                   "txt",
+}
+
+
+def extract_text(file_bytes: bytes, content_type: str = "", filename: str = "") -> str:
+    """
+    Unified text-extraction dispatcher.
+
+    Routes the raw file bytes to the correct processor based on *content_type*
+    (MIME string).  When the MIME type is absent or unrecognised, the function
+    falls back to guessing from the *filename* extension.
+
+    Parameters
+    ----------
+    file_bytes   : Raw bytes of the uploaded file.
+    content_type : MIME type string supplied by the HTTP client.
+    filename     : Original filename (used as extension fallback).
+
+    Returns
+    -------
+    Cleaned plain-text string, or "" when the format is unsupported.
+    No exception is raised; errors are logged.
+    """
+    ext = _resolve_extension(content_type, filename)
+    logger.info("extract_text: content_type=%r  filename=%r  resolved_ext=%r", content_type, filename, ext)
+
+    if ext == "pdf":
+        return extract_text_from_pdf(file_bytes)
+    if ext == "docx":
+        return extract_text_from_docx(file_bytes)
+    if ext == "txt":
+        return extract_text_from_txt(file_bytes)
+
+    logger.warning(
+        "extract_text: unsupported format (content_type=%r, filename=%r) – returning empty string",
+        content_type, filename,
+    )
+    return ""
+
+
+def _resolve_extension(content_type: str, filename: str) -> str:
+    """Return a normalised extension string ('pdf', 'docx', 'txt', or '')."""
+    # 1. Try MIME type first (most reliable)
+    ext = _MIME_TO_EXT.get((content_type or "").strip().lower(), "")
+    if ext:
+        return ext
+
+    # 2. Fallback: derive from filename extension
+    if filename:
+        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if suffix in ("pdf", "docx", "doc", "txt"):
+            return "docx" if suffix in ("doc", "docx") else suffix
+
+    return ""
 
 try:
     nlp = spacy.load("en_core_web_sm")
@@ -89,28 +151,89 @@ def match_role_and_skills(resume_skills, roles_db, user_given_role=None):
         "identified_skills": list(resume_skills_set)
     }
 
-def generate_roadmap(missing_skills):
+import urllib.parse
+
+def generate_roadmap(missing_skills_ranked):
+    if not missing_skills_ranked:
+        return []
+
+    # Handle legacy lists of strings gracefully
+    normalized = []
+    for item in missing_skills_ranked:
+        if isinstance(item, str):
+            normalized.append({"skill": item, "likelihood": 0.5, "priority": "medium"})
+        else:
+            normalized.append(item)
+
+    # Sort by likelihood (highest first) so high-likelihood skills appear in first weeks
+    sorted_skills = sorted(normalized, key=lambda x: x.get("likelihood", 0.0), reverse=True)
+
     roadmap = []
     week = 1
-    for skill in missing_skills:
+    for item in sorted_skills:
+        skill = item["skill"]
+        encoded = urllib.parse.quote(skill)
+        
         roadmap.append({
             "week": f"Week {week}-{week+1}",
             "focus": f"{skill.title()} Basics & Application",
             "resources": [
-                f"Coursera: Modern {skill.title()}",
-                f"YouTube: {skill.title()} Crash Course"
+                f"Coursera: https://www.coursera.org/search?query={encoded}",
+                f"YouTube: https://www.youtube.com/results?search_query={encoded}+crash+course"
             ]
         })
         week += 2
+        
     return roadmap
 
-def generate_interview_questions(missing_skills):
+from nlp.interview_bank import (
+    BEHAVIORAL_QUESTIONS,
+    SYSTEM_DESIGN_QUESTIONS,
+    TECHNICAL_SKILL_QUESTIONS,
+    get_role_domain,
+)
+import random
+
+def generate_interview_questions(missing_skills: list, role: str = "General Developer"):
+    """
+    Generate a categorized list of 10-15 interview questions based on the role and missing skills.
+    Returns a list of dicts with 'question', 'category', and 'difficulty'.
+    """
     questions = []
-    for skill in missing_skills[:5]:
-        questions.append(f"Can you explain the core concepts of {skill.title()} and how you'd use it in a production project?")
-    if not questions:
-        questions.append("Can you walk us through your most complex project, including the architecture and challenges?")
-    return questions
+    
+    # 1. Behavioral (always include 3-4)
+    num_behavioral = min(4, len(BEHAVIORAL_QUESTIONS))
+    questions.extend(random.sample(BEHAVIORAL_QUESTIONS, num_behavioral))
+    
+    # 2. System Design (include 2-3 based on role domain)
+    domain = get_role_domain(role)
+    sys_design_pool = SYSTEM_DESIGN_QUESTIONS.get(domain, SYSTEM_DESIGN_QUESTIONS["general"])
+    num_sys_design = min(3, len(sys_design_pool))
+    questions.extend(random.sample(sys_design_pool, num_sys_design))
+    
+    # 3. Technical (include 6-8 based on missing skills to probe gaps)
+    # Extract skill strings (handling both string lists and ranked dicts)
+    skill_names = [s["skill"].lower() if isinstance(s, dict) else str(s).lower() for s in missing_skills]
+    tech_pool = []
+    
+    for skill in skill_names:
+        if skill in TECHNICAL_SKILL_QUESTIONS:
+            tech_pool.extend(TECHNICAL_SKILL_QUESTIONS[skill])
+            
+    # If not enough missing-skill-specific questions, pad with general python/javascript/sql
+    if len(tech_pool) < 6:
+        for fallback in ["python", "javascript", "sql"]:
+            if fallback not in skill_names:
+                tech_pool.extend(TECHNICAL_SKILL_QUESTIONS[fallback])
+                
+    num_tech = min(8, len(tech_pool))
+    if tech_pool:
+        questions.extend(random.sample(tech_pool, num_tech))
+        
+    # Shuffle the final list so it doesn't always start with behavioral
+    random.shuffle(questions)
+    
+    return questions[:15]
 
 
 def _merge_results(
