@@ -48,6 +48,7 @@ from security import get_current_user
 from routes import auth, user
 from routes import jobs
 from routes import interview
+from routes import models as models_router
 
 # ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
@@ -146,6 +147,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(user.router, prefix="/api/v1/user", tags=["User Profile"])
 app.include_router(jobs.router, prefix="/api/v1", tags=["Resume Analysis"])
 app.include_router(interview.router, prefix="/api/v1", tags=["Interview Prep"])
+app.include_router(models_router.router, prefix="/api/v1", tags=["Model Versioning"])
 
 
 @app.get("/health", tags=["Health"])
