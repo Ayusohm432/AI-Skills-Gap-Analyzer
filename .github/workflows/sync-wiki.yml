@@ -6,7 +6,7 @@ name: Sync Wiki
 on:
   push:
     branches:
-      - main
+      - development
     paths:
       - 'wiki/**'
 
