@@ -5,6 +5,18 @@ Async background task that runs the full resume-analysis pipeline.
 
 Called via FastAPI BackgroundTasks — never directly by the HTTP handler.
 
+Pipeline steps (reflected in the job document's ``step`` / ``step_name`` fields)
+--------------------------------------------------------------------------------
+1  Resume upload received
+2  Text extraction  (PDF / DOCX / TXT + OCR fallback)
+3  BERT skill extraction
+4  K-Means skill categorization
+5  Random Forest role prediction
+6  LSTM missing-skills prediction
+7  Roadmap generation
+8  Interview question generation
+9  MongoDB storage
+
 State machine
 -------------
 pending  ──►  processing  ──►  completed
@@ -48,11 +60,38 @@ _MODEL_VERSION = (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _set_status(job_id: ObjectId, status: str, **extra) -> None:
-    """Atomically update a job document's status + updated_at."""
+# ── Pipeline step label map ───────────────────────────────────────────────────
+_STEP_NAMES: dict[int, str] = {
+    1: "Resume Upload",
+    2: "Text Extraction",
+    3: "BERT Skill Extraction",
+    4: "K-Means Skill Categorization",
+    5: "Random Forest Role Prediction",
+    6: "LSTM Missing-Skills Prediction",
+    7: "Roadmap Generation",
+    8: "Interview Question Generation",
+    9: "MongoDB Storage",
+}
+
+
+async def _set_status(
+    job_id: ObjectId,
+    status: str,
+    step: int | None = None,
+    **extra,
+) -> None:
+    """Atomically update a job document's status, current pipeline step, and updated_at."""
+    update: dict[str, Any] = {
+        "status":     status,
+        "updated_at": datetime.now(timezone.utc),
+        **extra,
+    }
+    if step is not None:
+        update["step"]      = step
+        update["step_name"] = _STEP_NAMES.get(step, f"Step {step}")
     await analysis_jobs_collection.update_one(
         {"_id": job_id},
-        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc), **extra}},
+        {"$set": update},
     )
 
 
@@ -106,11 +145,16 @@ async def run_analysis(
     oid = ObjectId(job_id)
 
     try:
-        # ── status: processing ────────────────────────────────────────
-        await _set_status(oid, "processing")
-        logger.info("[job=%s] status=processing", job_id)
+        # ── Step 1: Resume upload received ────────────────────────────
+        await _set_status(oid, "processing", step=1)
+        logger.info("[job=%s] status=processing  step=1 (Resume Upload)", job_id)
 
-        # ── 1. Text extraction (PDF / DOCX / TXT via unified dispatcher) ──────
+        # Guard: initialize analysis dict so the LSTM fallback branch
+        # can safely call analysis.get() even when the ML role path was taken.
+        analysis: dict = {}
+
+        # ── Step 2: Text extraction (PDF / DOCX / TXT + OCR fallback) ─
+        await _set_status(oid, "processing", step=2)
         raw_text = extract_text(file_bytes, content_type=content_type, filename=filename)
         if not raw_text.strip():
             logger.warning(
@@ -119,13 +163,15 @@ async def run_analysis(
                 job_id, content_type, filename,
             )
 
-        # ── 2. NLP skill extraction ───────────────────────────────────
+        # ── Step 3: BERT skill extraction ─────────────────────────────
+        await _set_status(oid, "processing", step=3)
         combined_results  = extract_skills_combined(raw_text)
         found_skills      = [r["skill"] for r in combined_results]
         skill_confidences = {r["skill"]: r["confidence"] for r in combined_results}
         logger.info("[job=%s] NLP extracted %d skills", job_id, len(found_skills))
 
-        # ── 3. Role prediction (ML → NLP fallback) ────────────────────
+        # ── Step 5: Random Forest role prediction (ML → NLP fallback) ─
+        await _set_status(oid, "processing", step=5)
         ml_role_result = predict_role(found_skills, ml_bundle or {}) if ml_bundle else \
             {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
 
@@ -160,7 +206,8 @@ async def run_analysis(
 
             logger.info("[job=%s] NLP role=%s (ml_source=%s)", job_id, target_role, ml_role_result["source"])
 
-        # ── 4. Missing-skills (LSTM → static lookup fallback) ────────────────
+        # ── Step 6: LSTM missing-skills prediction (→ static lookup fallback) ─
+        await _set_status(oid, "processing", step=6)
         seniority  = "Mid-level"
         ml_missing = predict_missing_skills(
             current_skills=found_skills,
@@ -186,7 +233,9 @@ async def run_analysis(
                 job_id, ml_missing["source"], target_role,
             )
             missing_skills = _static_skill_gap(target_role or "", found_skills)
-            # Re-run NLP gap analysis when the static table has no entry for this role
+            # Re-run NLP gap analysis when the static table has no entry for this role.
+            # `analysis` is guaranteed to be a dict here (initialized at the top of try-block;
+            # populated by the NLP fallback branch in Step 5 when used).
             if not missing_skills:
                 if ml_role_result["source"] == "ml":
                     from database import jobs_collection  # noqa: PLC0415
@@ -200,11 +249,10 @@ async def run_analysis(
             ml_missing = {**ml_missing, "source": "static_lookup"}
             logger.info("[job=%s] static_lookup: %d missing skills", job_id, len(missing_skills))
 
-        # ── 5. Readiness score ────────────────────────────────────────
+        # Readiness score (computed after roles + missing skills are settled)
         readiness_score = compute_readiness_score(identified_skills, missing_skills)
 
-        # ── 6. ML enrichment fields ───────────────────────────────────
-        # 6a. Role confidence + alternatives + new interpretability fields
+        # ML enrichment: role confidence + alternatives + interpretability
         role_confidence   = ml_role_result.get("confidence", 0.0)
         role_alternatives = [
             {"role": r["role"], "confidence": r["confidence"]}
@@ -216,28 +264,36 @@ async def run_analysis(
         role_inference_ms     = ml_role_result.get("inference_ms", 0.0)
         logger.debug("[job=%s] role inference_ms=%.2f", job_id, role_inference_ms)
 
-        # 6b. Skill categories for detected skills (Step 4 integration)
-        # Uses KMeans clusterer when available, falls back to rule-based taxonomy.
+        # ── Step 4: K-Means skill categorization ──────────────────────
+        # (Logged here after role resolution; categorizes detected skills into
+        # frontend / backend / devops / data buckets using KMeans + rule fallback.)
+        await _set_status(oid, "processing", step=4)
         skill_categories = categorize_skills(
             identified_skills,
             clusterer=ml_bundle.get("skill_clusterer") if ml_bundle else None,
         )
 
-        # 6c. Ranked missing skills with likelihood + priority
-        missing_confidences = ml_missing.get("confidences", {})
+        # Ranked missing skills with likelihood + priority
+        missing_confidences   = ml_missing.get("confidences", {})
         missing_skills_ranked = rank_missing_skills(missing_skills, missing_confidences)
 
-        # ── 7. Roadmap + interview questions ──────────────────────────
-        roadmap      = generate_roadmap(missing_skills_ranked)
+        # ── Step 7: Roadmap generation ────────────────────────────────
+        await _set_status(oid, "processing", step=7)
+        roadmap = generate_roadmap(missing_skills_ranked)
+
+        # ── Step 8: Interview question generation ─────────────────────
+        await _set_status(oid, "processing", step=8)
         interview_qs = generate_interview_questions(missing_skills, target_role)
 
-        # ── 8. Persist full result to analyses_collection ─────────────
+        # ── Step 9: MongoDB storage ───────────────────────────────────
+        await _set_status(oid, "processing", step=9)
         analysis_doc = {
             "user_id":               user_id,
             "job_ref":               job_id,
             "predicted_role":        target_role,
             "readiness_score":       readiness_score,
             "identified_skills":     identified_skills,
+            "skill_confidences":     skill_confidences,   # ← persisted for audit / re-query
             "missing_skills":        missing_skills,
             "roadmap":               roadmap,
             "interview_questions":   interview_qs,

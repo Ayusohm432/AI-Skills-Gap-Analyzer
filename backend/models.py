@@ -273,15 +273,19 @@ class AnalysisResult(BaseModel):
 
 class JobAcceptedResponse(BaseModel):
     """Returned immediately (HTTP 202) when a resume analysis job is submitted."""
-    job_id:  str
-    status:  str = "pending"
-    message: str = "Analysis job queued. Poll /api/v1/jobs/{job_id} for results."
+    job_id:            str
+    status:            str = "pending"
+    message:           str = "Analysis job queued. Poll /api/v1/jobs/{job_id} for results."
+    estimated_seconds: int = 30   # rough SLA hint so the frontend can set polling intervals
 
 
 class JobStatusResponse(BaseModel):
     """Returned by GET /api/v1/jobs/{job_id}."""
     job_id:     str
-    status:     str                         # pending | processing | completed | failed
+    status:     str                          # pending | processing | completed | failed
+    # Pipeline step progress (1-9; set during processing; 9 = storage done)
+    step:       Optional[int] = None
+    step_name:  Optional[str] = None
     filename:   Optional[str]   = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
