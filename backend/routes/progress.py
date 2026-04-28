@@ -1,11 +1,14 @@
 """
 routes/progress.py
 ==================
-Phase 5 – User Progress & Achievements API
+Phase 5 – User Progress, Achievements, Domain Mastery & Milestones
 
 Endpoints:
-  GET  /api/v1/user/progress              – full progress summary for the current user
+  GET  /api/v1/user/progress              – full progress summary
   POST /api/v1/user/progress/complete     – record a completed action and earn XP
+  GET  /api/v1/user/progress/actions      – list all valid action keys and XP rewards
+  GET  /api/v1/user/progress/domains      – skill-domain mastery breakdown
+  GET  /api/v1/user/progress/milestones   – analysis milestone history
   GET  /api/v1/user/badges                – full badge catalogue (earned + locked)
   POST /api/v1/user/badges/check          – trigger badge evaluation manually
 
@@ -30,6 +33,8 @@ from services.progress_service import (
     get_badges,
     check_and_award_badges,
 )
+from services.mastery_service import get_domain_mastery
+from services.milestone_service import get_milestone_history
 
 logger = logging.getLogger("routes.progress")
 router = APIRouter()
@@ -279,3 +284,41 @@ async def check_badges(
             badge["awarded_at"] = badge["awarded_at"].isoformat()
 
     return BadgeCheckResponse(**result)
+
+
+@router.get(
+    "/user/progress/domains",
+    summary="Get skill-domain mastery breakdown",
+    description=(
+        "Returns the user's XP and rank for each skill domain (frontend, backend, "
+        "data, ml, devops, security, mobile, general). Domain XP is earned automatically "
+        "from skills detected in resume analyses and closed skill gaps."
+    ),
+    tags=["Progress & Achievements"],
+)
+async def get_domain_mastery_view(
+    current_user: dict = Depends(get_current_user),
+):
+    """GET /api/v1/user/progress/domains"""
+    user_id = current_user["id"]
+    logger.info("Domain mastery query: user=%s", user_id)
+    return await get_domain_mastery(user_id)
+
+
+@router.get(
+    "/user/progress/milestones",
+    summary="Get analysis milestone history",
+    description=(
+        "Returns a history of milestones earned through resume analyses: "
+        "closed skill gaps, new skills discovered, readiness improvements, "
+        "and XP earned per milestone event."
+    ),
+    tags=["Progress & Achievements"],
+)
+async def get_milestone_history_view(
+    current_user: dict = Depends(get_current_user),
+):
+    """GET /api/v1/user/progress/milestones"""
+    user_id = current_user["id"]
+    logger.info("Milestone history query: user=%s", user_id)
+    return await get_milestone_history(user_id)

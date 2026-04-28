@@ -62,7 +62,9 @@ from routes import models as models_router
 from routes import github as github_router
 from routes import market as market_router
 from routes import progress as progress_router
+from routes import alerts as alerts_router
 from services.market_service import seed_market_data, refresh_all_roles
+from services.alerts_service import check_and_generate_alerts
 
 # ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
@@ -107,6 +109,16 @@ async def lifespan(app: FastAPI):
     from database import user_progress_collection as _upc
     await _upc.create_index("user_id", unique=True)
 
+    # Phase 5 Extension — Alerts indexes
+    from database import market_subscriptions_collection as _msc, market_alerts_collection as _mac
+    await _msc.create_index([("user_id", 1), ("role", 1)], unique=True)
+    await _mac.create_index("user_id")
+    await _mac.create_index("alert_id")
+
+    # Phase 5 Extension — Skill domain cache index
+    from database import skill_domain_cache_collection as _sdc
+    await _sdc.create_index("skill", unique=True)
+
     # 3. Mock Interview indexes (TTL index for automatic session expiry)
     await ensure_indexes()
 
@@ -136,6 +148,16 @@ async def lifespan(app: FastAPI):
         hour=2,
         minute=0,
         id="weekly_market_refresh",
+        replace_existing=True,
+    )
+    # After market refresh, check subscriptions and emit alerts
+    scheduler.add_job(
+        check_and_generate_alerts,
+        trigger="cron",
+        day_of_week="mon",
+        hour=2,
+        minute=30,
+        id="weekly_alert_generation",
         replace_existing=True,
     )
     scheduler.start()
@@ -194,6 +216,7 @@ app.include_router(models_router.router, prefix="/api/v1", tags=["Model Versioni
 app.include_router(github_router.router, prefix="/api/v1", tags=["GitHub Integration"])
 app.include_router(market_router.router,    prefix="/api/v1", tags=["Market Demand"])
 app.include_router(progress_router.router,  prefix="/api/v1", tags=["Progress & Achievements"])
+app.include_router(alerts_router.router,    prefix="/api/v1", tags=["Market Alerts"])
 
 
 @app.get("/health", tags=["Health"])

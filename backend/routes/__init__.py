@@ -1,1 +1,1 @@
-from . import auth, user, github, market, progress
+from . import auth, user, github, market, progress, alerts
