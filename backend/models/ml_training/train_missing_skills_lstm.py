@@ -25,11 +25,15 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 
+# ── Versioning helper (standardized metadata.json) ───────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from versioning import get_version_dir, save_version_artifacts  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-MODELS_DIR = backend_dir / "models" / "ml_models" / "v1.0"
 DATA_DIR = backend_dir / "models" / "data"
+
 
 MAX_SKILLS = 20
 EMB_DIM = 384
@@ -213,9 +217,17 @@ def train():
     logger.info(f"MRR       : {metrics['MRR']:.4f}  (Target >0.80)")
     logger.info(f"Latency   : {latency_ms:.2f} ms/sample  (Target <100 ms)")
 
-    # ── 10. Serialise All Four Artifacts ─────────────────────────────
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    # ── 10. Evaluate accuracy on test set ────────────────────────────────────
+    _, test_accuracy = keras_model.evaluate(
+        [X_skills_te, X_meta_te], y_te, verbose=0
+    )
+    logger.info(f"Test binary accuracy: {test_accuracy:.4f}")
 
+    # ── 11. Resolve versioned output directory ────────────────────────────────
+    MODELS_DIR = get_version_dir()   # reads ML_MODEL_VERSION env var → default v1.0
+    logger.info(f"Saving artifacts to: {MODELS_DIR}")
+
+    # ── 12. Serialise All Four Artifacts ─────────────────────────────────────
     model_path = MODELS_DIR / "missing_skills_lstm.keras"
     keras_model.save(model_path)
     logger.info(f"[1/4] Model   → {model_path}  (native Keras format)")
@@ -231,6 +243,24 @@ def train():
     sen_enc_path = MODELS_DIR / "seniority_encoder.pkl"
     joblib.dump(seniority_enc, sen_enc_path)
     logger.info(f"[4/4] Sen enc → {sen_enc_path}")
+
+    # ── 13. Write standardized metadata.json ─────────────────────────────────
+    save_version_artifacts(
+        model_name="Missing-Skills LSTM",
+        accuracy=round(float(test_accuracy), 6),
+        f1_score=round(float(metrics["Recall@10"]), 6),   # Recall@10 as primary metric
+        training_samples=int(len(idx_tr)),
+        test_samples=int(len(idx_te)),
+        extra_metadata={
+            "recall_at_10":     round(float(metrics["Recall@10"]), 6),
+            "recall_at_20":     round(float(metrics["Recall@20"]), 6),
+            "mrr":              round(float(metrics["MRR"]), 6),
+            "latency_ms":       round(float(latency_ms), 4),
+            "vocab_size":       VOCAB_SIZE,
+            "max_skills":       MAX_SKILLS,
+            "embedding_dim":    EMB_DIM,
+        },
+    )
 
     logger.info("Training script completed successfully.")
 
