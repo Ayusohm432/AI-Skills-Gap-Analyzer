@@ -21,6 +21,9 @@ refresh_tokens_collection = db["refresh_tokens"]
 analysis_jobs_collection = db["analysis_jobs"]
 interview_sessions_collection = db["interview_sessions"]
 
+# Phase 4 — Market demand data (weekly snapshots per role)
+market_demand_collection = db["market_demand"]
+
 async def ensure_indexes():
     """Ensure necessary indexes exist in the database."""
     # TTL index for interview sessions: expire 30 minutes after updated_at

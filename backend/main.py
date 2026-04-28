@@ -52,12 +52,16 @@ from nlp.engine import (
     generate_roadmap, 
     generate_interview_questions
 )
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from security import get_current_user
 from routes import auth, user
 from routes import jobs
 from routes import interview
 from routes import models as models_router
 from routes import github as github_router
+from routes import market as market_router
+from services.market_service import seed_market_data, refresh_all_roles
 
 # ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
@@ -97,11 +101,11 @@ async def lifespan(app: FastAPI):
     await analyses_collection.create_index("predicted_role")
     await analyses_collection.create_index("model_version")
     await analyses_collection.create_index("user_id")
-    
-    # 4. Mock Interview indexes (TTL index for automatic session expiry)
+
+    # 3. Mock Interview indexes (TTL index for automatic session expiry)
     await ensure_indexes()
 
-    # 3. Load ML models in a thread pool so we don't block the event loop.
+    # 4. Load ML models in a thread pool so we don't block the event loop.
     #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
     loop = asyncio.get_running_loop()
     try:
@@ -112,9 +116,31 @@ async def lifespan(app: FastAPI):
 
     app.state.ml_models = bundle
 
+    # 5. Phase 4 — Market demand: seed collection on startup (non-blocking)
+    try:
+        await seed_market_data()
+    except Exception as exc:
+        logger.warning("Market seed failed (non-fatal): %s", exc)
+
+    # 6. APScheduler — weekly market data refresh (every Monday 02:00 UTC)
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        refresh_all_roles,
+        trigger="cron",
+        day_of_week="mon",
+        hour=2,
+        minute=0,
+        id="weekly_market_refresh",
+        replace_existing=True,
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+    logger.info("APScheduler started — weekly market refresh scheduled (Mon 02:00 UTC)")
+
     yield  # ← app is running here
 
-    # Shutdown: nothing special required for sklearn/keras models
+    # Shutdown
+    scheduler.shutdown(wait=False)
     logging.getLogger("ml_loader").info("Shutting down – ML models released.")
 
 
@@ -161,6 +187,7 @@ app.include_router(jobs.router, prefix="/api/v1", tags=["Resume Analysis"])
 app.include_router(interview.router, prefix="/api/v1", tags=["Interview Prep"])
 app.include_router(models_router.router, prefix="/api/v1", tags=["Model Versioning"])
 app.include_router(github_router.router, prefix="/api/v1", tags=["GitHub Integration"])
+app.include_router(market_router.router, prefix="/api/v1", tags=["Market Demand"])
 
 
 @app.get("/health", tags=["Health"])
