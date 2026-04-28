@@ -111,6 +111,7 @@ export default function UploadPage() {
       finalRole = customRole.trim() !== "" ? customRole.trim() : "Auto Detect";
     }
     formData.append("role", finalRole);
+    localStorage.setItem("userSelectedRole", finalRole);
 
     try {
       // ── Step 1: Submit job (expect 202 + job_id) ──────────────────

@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { jsPDF } from 'jspdf';
 import {
   CheckCircle2, XCircle, Zap, Download, MessageSquare,
-  ChevronRight, ArrowLeft, BookOpen, Loader2
+  ChevronRight, ArrowLeft, BookOpen, Loader2, Target
 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
@@ -21,8 +21,12 @@ const fadeUp = (delay = 0) => ({
 export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [userSelectedRole, setUserSelectedRole] = useState("Auto Detect");
 
   useEffect(() => {
+    const savedRole = localStorage.getItem("userSelectedRole");
+    if (savedRole) setUserSelectedRole(savedRole);
+
     const saved = localStorage.getItem("analysisResult");
     if (saved) {
       setData(JSON.parse(saved));
@@ -31,6 +35,9 @@ export default function DashboardPage() {
       setData({
         job_id: "DEMO-123",
         target_role: "Data Scientist",
+        predicted_role: "Machine Learning Engineer",
+        role_confidence: 84.5,
+        role_alternatives: ["Data Scientist", "Backend Developer"],
         skills_detected: ['Python', 'NumPy', 'Pandas', 'Statistics', 'SQL', 'Git'],
         missing_skills: ['TensorFlow', 'Docker', 'MLOps', 'AWS', 'PyTorch'],
         readiness_score: 58,
@@ -138,6 +145,35 @@ export default function DashboardPage() {
       ? 'var(--accent-warm)'
       : 'var(--accent-coral)';
 
+  // Determine what to display in the header
+  const displayTargetRole = userSelectedRole !== "Auto Detect" ? userSelectedRole : (data.predicted_role || "Unknown");
+
+  // Determine the true ML prediction (even if overridden by user)
+  let trueMlPrediction = null;
+  let trueMlConfidence = 0;
+  let trueMlAlternatives = [];
+  const isLowConfidence = data.ml_role_source === "low_confidence";
+
+  const normalizeConfidence = (val) => {
+    if (!val) return 0;
+    return (val <= 1 && val > 0) ? val * 100 : val;
+  };
+
+  if (userSelectedRole !== "Auto Detect") {
+    // User forced a role. The ML's prediction is buried in role_alternatives.
+    if (data.role_alternatives && data.role_alternatives.length > 0) {
+      const sortedAlts = [...data.role_alternatives].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+      trueMlPrediction = typeof sortedAlts[0] === 'string' ? sortedAlts[0] : sortedAlts[0].role;
+      trueMlConfidence = normalizeConfidence(sortedAlts[0].confidence);
+      trueMlAlternatives = sortedAlts.slice(1);
+    }
+  } else {
+    // Auto Detect was used. ML prediction is predicted_role.
+    trueMlPrediction = data.predicted_role;
+    trueMlConfidence = normalizeConfidence(data.role_confidence);
+    trueMlAlternatives = data.role_alternatives || [];
+  }
+
   return (
     <PageTransition>
       <div className="min-h-screen relative flex flex-col">
@@ -158,7 +194,7 @@ export default function DashboardPage() {
                   Your Analysis
                 </h1>
                 <p className="text-sm text-[var(--text-muted)] mt-1.5">
-                  Target: <span className="text-[var(--text-secondary)] font-medium">{data.target_role || "Unknown"}</span>
+                  Target: <span className="text-[var(--text-secondary)] font-medium">{displayTargetRole}</span>
                 </p>
               </div>
             </motion.header>
@@ -298,6 +334,74 @@ export default function DashboardPage() {
               {/* ===== SIDEBAR ===== */}
               <div className="space-y-6">
 
+                {/* Role Prediction */}
+                <motion.div {...fadeUp(0.12)} className="glass-card p-8 noise-overlay overflow-hidden relative group">
+                  <div className="relative z-10">
+                    <div className="flex items-center justify-between mb-6">
+                      <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">AI Role Prediction</p>
+                      <Target size={14} className="text-[var(--text-muted)]" />
+                    </div>
+
+                    {isLowConfidence && userSelectedRole === "Auto Detect" ? (
+                      <div className="text-center py-4">
+                        <span className="text-sm text-[var(--accent-coral)] font-medium">Low Confidence Match</span>
+                        <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">The AI could not strongly match this resume to a specific technical role.</p>
+                      </div>
+                    ) : trueMlPrediction ? (
+                      <>
+                        <div className="flex items-end justify-between mb-2">
+                          <h3 className="text-xl font-bold text-[var(--text-primary)] tracking-tight leading-tight w-2/3">
+                            {trueMlPrediction}
+                          </h3>
+                          <span className={`text-lg font-bold ${
+                            trueMlConfidence >= 80 ? 'text-[var(--accent-teal)]' : 
+                            trueMlConfidence >= 60 ? 'text-[var(--accent-warm)]' : 
+                            'text-[var(--accent-coral)]'
+                          }`}>
+                            {Math.round(trueMlConfidence)}%
+                          </span>
+                        </div>
+
+                        {/* Confidence Bar */}
+                        <div className="h-1.5 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden border border-[var(--border-subtle)] mb-6">
+                          <motion.div 
+                            className={`h-full rounded-full ${
+                              trueMlConfidence >= 80 ? 'bg-[var(--accent-teal)]' : 
+                              trueMlConfidence >= 60 ? 'bg-[var(--accent-warm)]' : 
+                              'bg-[var(--accent-coral)]'
+                            }`}
+                            initial={{ width: '0%' }}
+                            animate={{ width: `${trueMlConfidence}%` }}
+                            transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
+                          />
+                        </div>
+
+                        {/* Alternative Roles */}
+                        {trueMlAlternatives && trueMlAlternatives.length > 0 && (
+                           <div>
+                             <p className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mb-3">Alternative Matches</p>
+                             <div className="flex flex-wrap gap-2">
+                               {trueMlAlternatives.map((alt, i) => {
+                                 const roleName = typeof alt === 'string' ? alt : alt.role;
+                                 return (
+                                   <span key={i} className="px-2.5 py-1 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs rounded-md font-medium hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-colors cursor-default">
+                                     {roleName}
+                                   </span>
+                                 );
+                               })}
+                             </div>
+                           </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-center py-4">
+                        <span className="text-sm text-[var(--text-muted)]">No prediction available</span>
+                        <h3 className="text-lg font-semibold text-[var(--text-primary)] mt-1">{displayTargetRole}</h3>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+
                 {/* Readiness Score */}
                 <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay overflow-hidden relative group">
                   <div className="relative z-10">
@@ -334,7 +438,7 @@ export default function DashboardPage() {
 
                     {/* Bar Chart */}
                     <div className="h-28 w-full opacity-80 group-hover:opacity-100 transition-opacity">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                         <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                           <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} />
@@ -386,9 +490,27 @@ export default function DashboardPage() {
                           <div className="w-7 h-7 rounded-lg bg-[var(--accent-lavender-dim)] flex items-center justify-center text-[var(--accent-lavender)] text-xs font-bold shrink-0 group-hover:bg-[var(--accent-lavender)]/20 transition-colors">
                             {idx + 1}
                           </div>
-                          <p className="text-sm text-[var(--text-secondary)] leading-relaxed group-hover:text-[var(--text-primary)] transition-colors">
-                            {q}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-[var(--text-secondary)] leading-relaxed group-hover:text-[var(--text-primary)] transition-colors">
+                              {typeof q === 'string' ? q : q.question}
+                            </p>
+                            {typeof q === 'object' && q.category && (
+                              <div className="flex gap-2 mt-2">
+                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-medium">
+                                  {q.category}
+                                </span>
+                                {q.difficulty && (
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${
+                                    q.difficulty.toLowerCase() === 'hard' ? 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)]' :
+                                    q.difficulty.toLowerCase() === 'medium' ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)]' :
+                                    'bg-[var(--accent-teal-dim)] text-[var(--accent-teal)]'
+                                  }`}>
+                                    {q.difficulty}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </motion.div>
                       ))}
                     </div>
