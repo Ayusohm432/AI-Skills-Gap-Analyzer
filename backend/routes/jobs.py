@@ -220,6 +220,8 @@ async def get_job_status(
     return JobStatusResponse(
         job_id=job_id,
         status=job["status"],
+        step=job.get("step"),
+        step_name=job.get("step_name"),
         filename=job.get("filename"),
         created_at=job.get("created_at"),
         updated_at=job.get("updated_at"),
