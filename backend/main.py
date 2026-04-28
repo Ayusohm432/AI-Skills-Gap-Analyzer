@@ -63,6 +63,7 @@ from routes import github as github_router
 from routes import market as market_router
 from routes import progress as progress_router
 from routes import alerts as alerts_router
+from routes import benchmark as benchmark_router
 from services.market_service import seed_market_data, refresh_all_roles
 from services.alerts_service import check_and_generate_alerts
 
@@ -104,6 +105,8 @@ async def lifespan(app: FastAPI):
     await analyses_collection.create_index("predicted_role")
     await analyses_collection.create_index("model_version")
     await analyses_collection.create_index("user_id")
+    # Phase 4 Extension — compound index for benchmarking aggregation (role + user)
+    await analyses_collection.create_index([("predicted_role", 1), ("user_id", 1)])
 
     # Phase 5 — Progress tracking indexes
     from database import user_progress_collection as _upc
@@ -215,6 +218,7 @@ app.include_router(interview.router, prefix="/api/v1", tags=["Interview Prep"])
 app.include_router(models_router.router, prefix="/api/v1", tags=["Model Versioning"])
 app.include_router(github_router.router, prefix="/api/v1", tags=["GitHub Integration"])
 app.include_router(market_router.router,    prefix="/api/v1", tags=["Market Demand"])
+app.include_router(benchmark_router.router, prefix="/api/v1", tags=["Market Demand"])
 app.include_router(progress_router.router,  prefix="/api/v1", tags=["Progress & Achievements"])
 app.include_router(alerts_router.router,    prefix="/api/v1", tags=["Market Alerts"])
 
