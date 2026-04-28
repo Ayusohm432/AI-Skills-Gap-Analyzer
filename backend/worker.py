@@ -174,7 +174,10 @@ async def run_analysis(
             # LSTM succeeded with results – use them
             missing_skills    = ml_missing["missing_skills"]
             identified_skills = found_skills
-            logger.info("[job=%s] LSTM predicted %d missing skills", job_id, len(missing_skills))
+            logger.info(
+                "[job=%s] LSTM predicted %d missing skills (%.2f ms)",
+                job_id, len(missing_skills), ml_missing.get("inference_ms", 0.0),
+            )
         else:
             # LSTM unavailable, raised an exception, or returned nothing –
             # use the static skill-gap lookup table as the authoritative fallback.
