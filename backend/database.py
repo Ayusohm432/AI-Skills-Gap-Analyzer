@@ -24,6 +24,16 @@ interview_sessions_collection = db["interview_sessions"]
 # Phase 4 — Market demand data (weekly snapshots per role)
 market_demand_collection = db["market_demand"]
 
+# Phase 5 — User progress tracking & achievements
+user_progress_collection = db["user_progress"]
+
+# Phase 5 Extension — Market demand alert subscriptions & alert events
+market_subscriptions_collection = db["market_subscriptions"]
+market_alerts_collection        = db["market_alerts"]
+
+# Phase 5 Extension — Dynamic skill→domain resolution cache
+skill_domain_cache_collection   = db["skill_domain_cache"]
+
 async def ensure_indexes():
     """Ensure necessary indexes exist in the database."""
     # TTL index for interview sessions: expire 30 minutes after updated_at
