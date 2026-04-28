@@ -32,6 +32,18 @@ EMB_DIM    = 384  # all-MiniLM-L6-v2 embedding dimension
 # predicted_role field is set to "Auto Detect" in the stored result.
 ROLE_CONFIDENCE_THRESHOLD: float = 0.60
 
+# SLA targets (ms) — logged as WARNING when exceeded
+_ROLE_SLA_MS: float = 50.0
+_LSTM_SLA_MS: float = 100.0
+
+# ── Module-level encoder cache ────────────────────────────────────────────────
+# SentenceTransformer is a heavy object (~90 MB). Creating it inside
+# predict_missing_skills() on every call costs 2-5 s per invocation and
+# completely breaks the <100 ms latency target.
+# We cache it here (lazy init, thread-safe for single-process uvicorn).
+_lstm_encoder        = None   # SentenceTransformer instance once loaded
+_lstm_encoder_tried  = False  # prevents repeated disk reads after a failure
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -55,6 +67,30 @@ def _skills_to_vector(skills: list[str], feature_names: list[str]) -> np.ndarray
         if feat.lower() in skills_lower:
             vec[i] = 1.0
     return vec
+
+
+def _get_lstm_encoder():
+    """
+    Return a cached SentenceTransformer("all-MiniLM-L6-v2") instance.
+
+    The encoder is created once and reused for every ``predict_missing_skills``
+    call.  If sentence-transformers is not installed (or the first load fails),
+    returns None so callers can fall back gracefully.
+    """
+    global _lstm_encoder, _lstm_encoder_tried
+    if _lstm_encoder is not None:
+        return _lstm_encoder
+    if _lstm_encoder_tried:
+        return None   # already failed — don't retry
+    _lstm_encoder_tried = True
+    try:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+        _lstm_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+        logger.info("[LSTM] SentenceTransformer loaded and cached")
+    except Exception as exc:
+        logger.warning("[LSTM] SentenceTransformer unavailable: %s", exc)
+        _lstm_encoder = None
+    return _lstm_encoder
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -218,16 +254,29 @@ def predict_missing_skills(
     """
     Use the multi-input LSTM to predict the most likely missing skills.
 
+    Skill sequences are zero-padded / truncated to ``MAX_SKILLS`` (20) frames,
+    each embedded with the cached ``all-MiniLM-L6-v2`` SentenceTransformer so
+    a module-level instance is reused across calls (< 5 ms warm encoding vs
+    2-5 s cold creation).
+
     Returns
     -------
     {
         "missing_skills": [str, ...],      # top_n skill names
         "confidences":    {skill: float},  # raw sigmoid probabilities
+        "inference_ms":   float,           # wall-clock inference time
         "source":         "ml" | "fallback"
     }
     """
+    _FALLBACK = {
+        "missing_skills": [],
+        "confidences":    {},
+        "inference_ms":   0.0,
+        "source":         "fallback",
+    }
+
     if bundle is None:
-        return {"missing_skills": [], "confidences": {}, "source": "fallback"}
+        return _FALLBACK
 
     lstm_model        = bundle.get("lstm_model")
     mlb               = bundle.get("lstm_mlb")
@@ -236,31 +285,54 @@ def predict_missing_skills(
 
     if any(x is None for x in [lstm_model, mlb, role_encoder, seniority_encoder]):
         logger.warning("LSTM artifacts missing – returning source=fallback")
-        return {"missing_skills": [], "confidences": {}, "source": "fallback"}
+        return _FALLBACK
+
+    # ── Encoder guard (must be ready before we start the timer) ──────────
+    encoder = _get_lstm_encoder()
+    if encoder is None:
+        logger.warning(
+            "[LSTM] SentenceTransformer unavailable – returning source=fallback"
+        )
+        return _FALLBACK
 
     try:
-        # ── Branch B: metadata vector ────────────────────────────────
-        X_role = role_encoder.transform([[target_role]])   # (1, n_roles)
-        X_sen  = seniority_encoder.transform([[seniority]])  # (1, 4)
+        t0 = time.perf_counter()
+
+        # ── Branch B: metadata vector ─────────────────────────────────
+        X_role = role_encoder.transform([[target_role]])    # (1, n_roles)
+        X_sen  = seniority_encoder.transform([[seniority]]) # (1, 4)
         X_meta = np.concatenate([X_role, X_sen], axis=1).astype(np.float32)
 
-        # ── Branch A: skill-sequence tensor ──────────────────────────
-        # Import sentence-transformers lazily so cold-start is faster
-        # when LSTM is not used.
-        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
-
-        encoder  = SentenceTransformer("all-MiniLM-L6-v2")
+        # ── Branch A: skill-sequence tensor (padded to MAX_SKILLS=20) ──
+        # Truncate to at most MAX_SKILLS entries, then embed each one.
+        # Remaining rows stay as zeros (zero-padding).
+        skills_truncated = current_skills[:MAX_SKILLS]
         X_skills = np.zeros((1, MAX_SKILLS, EMB_DIM), dtype=np.float32)
-        for idx, skill in enumerate(current_skills[:MAX_SKILLS]):
-            emb = encoder.encode(skill, convert_to_numpy=True, normalize_embeddings=True)
-            X_skills[0, idx, :] = emb
+        if skills_truncated:
+            embeddings = encoder.encode(
+                skills_truncated,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )  # shape: (len(skills_truncated), EMB_DIM)
+            X_skills[0, : len(skills_truncated), :] = embeddings
 
-        # ── Inference ────────────────────────────────────────────────
+        # ── Inference ─────────────────────────────────────────────────
         predictions = lstm_model.predict([X_skills, X_meta], verbose=0)[0]
 
-        classes         = mlb.classes_
-        sorted_indices  = np.argsort(predictions)[::-1]
-        current_lower   = {s.lower() for s in current_skills}
+        inference_ms = round((time.perf_counter() - t0) * 1000, 2)
+        if inference_ms > _LSTM_SLA_MS:
+            logger.warning(
+                "[LSTM] inference took %.2f ms (> %.0f ms SLA) for %d skills / role '%s'",
+                inference_ms, _LSTM_SLA_MS, len(current_skills), target_role,
+            )
+        else:
+            logger.debug("[LSTM] inference %.2f ms", inference_ms)
+
+        # ── Rank and filter ───────────────────────────────────────────
+        classes        = mlb.classes_
+        sorted_indices = np.argsort(predictions)[::-1]
+        current_lower  = {s.lower() for s in current_skills}
 
         recommended: list[str] = []
         confidences:  dict     = {}
@@ -277,6 +349,7 @@ def predict_missing_skills(
         return {
             "missing_skills": recommended,
             "confidences":    confidences,
+            "inference_ms":   inference_ms,
             "source":         "ml",
         }
     except Exception as exc:
@@ -285,7 +358,12 @@ def predict_missing_skills(
             type(exc).__name__, target_role, exc,
             exc_info=True,
         )
-        return {"missing_skills": [], "confidences": {}, "source": "fallback"}
+        return {
+            "missing_skills": [],
+            "confidences":    {},
+            "inference_ms":   0.0,
+            "source":         "fallback",
+        }
 
 
 def cluster_skills(
