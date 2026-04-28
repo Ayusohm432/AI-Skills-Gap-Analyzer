@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,39 @@ def _skills_to_vector(skills: list[str], feature_names: list[str]) -> np.ndarray
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+# Number of top predictive skills to surface in the response.
+_TOP_PREDICTIVE_SKILLS_N: int = 5
+
+
+def _top_predictive_skills(
+    vec: "np.ndarray",
+    feat_names: list[str],
+    model,
+    top_n: int = _TOP_PREDICTIVE_SKILLS_N,
+) -> list[str]:
+    """
+    Return the names of the user's skills that contributed most to the
+    Random Forest prediction, ranked by ``feature_importances_``.
+
+    Only features where the user has the skill (vec[i] == 1) are considered.
+    Returns an empty list if the model has no ``feature_importances_`` attribute.
+    """
+    importances = getattr(model, "feature_importances_", None)
+    if importances is None or len(importances) != len(feat_names):
+        return []
+
+    # Mask to only the skills the user actually has
+    user_mask   = vec.astype(bool)
+    scores      = importances * user_mask          # zero out skills not in resume
+    top_indices = np.argsort(scores)[::-1][:top_n]
+
+    return [
+        feat_names[i]
+        for i in top_indices
+        if user_mask[i]  # double-check — guard against floating-point edge cases
+    ]
+
+
 def predict_role(
     skills: list[str],
     bundle: dict,
@@ -69,34 +103,68 @@ def predict_role(
     Returns
     -------
     {
-        "predicted_role": str,
-        "confidence": float (0-1),
-        "top_roles": [{"role": str, "confidence": float}, ...],
-        "source": "ml" | "fallback"
+        "predicted_role":        str,
+        "confidence":            float  (0-1),
+        "top_roles":             [{"role": str, "confidence": float}, ...],
+        "role_probabilities":    {role: float, ...},          # full dict
+        "top_predictive_skills": [str, ...],                  # from feature_importances_
+        "inference_ms":          float,                       # wall-clock ms
+        "source":                "ml" | "low_confidence" | "fallback"
     }
     """
     model       = bundle.get("role_predictor")
     feat_names  = _feature_names(bundle)
     role_labels = _role_labels(bundle)
 
+    _EMPTY = {
+        "predicted_role":        None,
+        "confidence":            0.0,
+        "top_roles":             [],
+        "role_probabilities":    {},
+        "top_predictive_skills": [],
+        "inference_ms":          0.0,
+        "source":                "fallback",
+    }
+
     if model is None or not feat_names or not role_labels:
         logger.warning("role_predictor not available – returning source=fallback")
-        return {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
+        return _EMPTY
 
     try:
-        vec         = _skills_to_vector(skills, feat_names)
-        pred_idx    = int(model.predict([vec])[0])
-        proba       = model.predict_proba([vec])[0]
+        t0  = time.perf_counter()
 
+        vec      = _skills_to_vector(skills, feat_names)
+        pred_idx = int(model.predict([vec])[0])
+        proba    = model.predict_proba([vec])[0]
+
+        inference_ms = round((time.perf_counter() - t0) * 1000, 2)
+        if inference_ms > 50:
+            logger.warning(
+                "predict_role: inference took %.2f ms (> 50 ms SLA) for %d skills",
+                inference_ms, len(skills),
+            )
+        else:
+            logger.debug("predict_role: inference %.2f ms", inference_ms)
+
+        # ── Top-N role list (backward compat) ────────────────────────
         top_indices = np.argsort(proba)[::-1][:top_n]
         top_roles   = [
             {"role": role_labels[i], "confidence": round(float(proba[i]), 4)}
             for i in top_indices
         ]
 
+        # ── Full probability map {role: prob} ─────────────────────────
+        role_probabilities = {
+            role_labels[i]: round(float(proba[i]), 4)
+            for i in range(len(role_labels))
+        }
+
+        # ── Top skills that drove the prediction ──────────────────────
+        top_pred_skills = _top_predictive_skills(vec, feat_names, model)
+
         confidence = round(float(proba[pred_idx]), 4)
 
-        # ── Confidence threshold gate ────────────────────────────────
+        # ── Confidence threshold gate ─────────────────────────────────
         if confidence < ROLE_CONFIDENCE_THRESHOLD:
             logger.warning(
                 "predict_role: confidence %.4f < threshold %.2f for role '%s' – "
@@ -104,25 +172,40 @@ def predict_role(
                 confidence, ROLE_CONFIDENCE_THRESHOLD, role_labels[pred_idx],
             )
             return {
-                "predicted_role": role_labels[pred_idx],   # kept for logging
-                "confidence":     confidence,
-                "top_roles":      top_roles,
-                "source":         "low_confidence",
+                "predicted_role":        role_labels[pred_idx],  # kept for logging
+                "confidence":            confidence,
+                "top_roles":             top_roles,
+                "role_probabilities":    role_probabilities,
+                "top_predictive_skills": top_pred_skills,
+                "inference_ms":          inference_ms,
+                "source":                "low_confidence",
             }
 
         return {
-            "predicted_role": role_labels[pred_idx],
-            "confidence":     confidence,
-            "top_roles":      top_roles,
-            "source":         "ml",
+            "predicted_role":        role_labels[pred_idx],
+            "confidence":            confidence,
+            "top_roles":             top_roles,
+            "role_probabilities":    role_probabilities,
+            "top_predictive_skills": top_pred_skills,
+            "inference_ms":          inference_ms,
+            "source":                "ml",
         }
+
     except Exception as exc:
         logger.error(
             "predict_role error (%s): %s",
             type(exc).__name__, exc,
             exc_info=True,
         )
-        return {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
+        return {
+            "predicted_role":        None,
+            "confidence":            0.0,
+            "top_roles":             [],
+            "role_probabilities":    {},
+            "top_predictive_skills": [],
+            "inference_ms":          0.0,
+            "source":                "fallback",
+        }
 
 
 def predict_missing_skills(

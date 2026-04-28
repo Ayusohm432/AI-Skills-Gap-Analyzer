@@ -27,7 +27,13 @@ from fastapi import (
 )
 
 from database import analysis_jobs_collection, jobs_collection
-from models import AnalysisResult, JobAcceptedResponse, JobStatusResponse
+from models import (
+    AnalysisResult,
+    JobAcceptedResponse,
+    JobStatusResponse,
+    PredictRoleRequest,
+    PredictRoleResponse,
+)
 from security import get_current_user
 from worker import run_analysis
 
@@ -201,6 +207,8 @@ async def get_job_status(
             # ML enrichment
             "role_confidence":        raw.get("role_confidence", 0.0),
             "role_alternatives":      raw.get("role_alternatives", []),
+            "role_probabilities":     raw.get("role_probabilities", {}),
+            "top_predictive_skills":  raw.get("top_predictive_skills", []),
             "skill_categories":       raw.get("skill_categories", {}),
             "missing_skills_ranked":  raw.get("missing_skills_ranked", []),
             "model_version":          raw.get("model_version", "unknown"),
@@ -217,4 +225,72 @@ async def get_job_status(
         updated_at=job.get("updated_at"),
         result=result,
         error=job.get("error"),
+    )
+
+
+# ── POST /predict-role ─────────────────────────────────────────────────────────
+
+@router.post(
+    "/predict-role",
+    response_model=PredictRoleResponse,
+    summary="Predict role from a skills list",
+    description=(
+        "Runs the trained Random Forest role predictor synchronously on a list of "
+        "skills and returns the predicted role, full probability map, the top skills "
+        "that drove the prediction, and the server-side inference time. "
+        "Responds immediately (no background task). Requires JWT authentication."
+    ),
+    tags=["Resume Analysis"],
+)
+async def predict_role_endpoint(
+    request:      Request,
+    body:         PredictRoleRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Synchronous role prediction endpoint.
+
+    Uses the Random Forest model loaded at startup.  When confidence is below
+    the 0.60 threshold, ``predicted_role`` is set to ``"Auto Detect"`` and
+    ``source`` is ``"low_confidence"``.
+    """
+    from ml_inference import predict_role as _predict_role  # noqa: PLC0415
+
+    ml_bundle = getattr(request.app.state, "ml_models", None)
+    if ml_bundle is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ML models are not loaded. Try again in a few seconds.",
+        )
+
+    result = _predict_role(skills=body.skills, bundle=ml_bundle)
+
+    # Apply the same confidence-fallback logic as the worker pipeline
+    predicted_role = result["predicted_role"]
+    if result["source"] == "low_confidence":
+        predicted_role = "Auto Detect"
+
+    role_alternatives = [
+        {"role": r["role"], "confidence": r["confidence"]}
+        for r in result.get("top_roles", [])
+        if r["role"] != predicted_role
+    ]
+
+    logger.info(
+        "predict-role: user=%s  role=%s  confidence=%.4f  source=%s  ms=%.2f",
+        current_user["id"],
+        predicted_role,
+        result["confidence"],
+        result["source"],
+        result.get("inference_ms", 0.0),
+    )
+
+    return PredictRoleResponse(
+        predicted_role=predicted_role or "Auto Detect",
+        confidence=result["confidence"],
+        role_probabilities=result.get("role_probabilities", {}),
+        top_predictive_skills=result.get("top_predictive_skills", []),
+        role_alternatives=role_alternatives,
+        inference_ms=result.get("inference_ms", 0.0),
+        source=result["source"],
     )

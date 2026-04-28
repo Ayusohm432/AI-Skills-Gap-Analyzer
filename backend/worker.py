@@ -201,13 +201,17 @@ async def run_analysis(
         readiness_score = compute_readiness_score(identified_skills, missing_skills)
 
         # ── 6. ML enrichment fields ───────────────────────────────────
-        # 6a. Role confidence + alternatives
-        role_confidence  = ml_role_result.get("confidence", 0.0)
+        # 6a. Role confidence + alternatives + new interpretability fields
+        role_confidence   = ml_role_result.get("confidence", 0.0)
         role_alternatives = [
             {"role": r["role"], "confidence": r["confidence"]}
             for r in ml_role_result.get("top_roles", [])
             if r["role"] != target_role   # exclude the primary prediction
         ]
+        role_probabilities    = ml_role_result.get("role_probabilities", {})
+        top_predictive_skills = ml_role_result.get("top_predictive_skills", [])
+        role_inference_ms     = ml_role_result.get("inference_ms", 0.0)
+        logger.debug("[job=%s] role inference_ms=%.2f", job_id, role_inference_ms)
 
         # 6b. Skill categories for detected skills (Step 4 integration)
         # Uses KMeans clusterer when available, falls back to rule-based taxonomy.
@@ -237,6 +241,8 @@ async def run_analysis(
             # ML enrichment
             "role_confidence":        role_confidence,
             "role_alternatives":      role_alternatives,
+            "role_probabilities":     role_probabilities,
+            "top_predictive_skills":  top_predictive_skills,
             "skill_categories":       skill_categories,
             "missing_skills_ranked":  missing_skills_ranked,
             "model_version":          _MODEL_VERSION,
@@ -260,6 +266,8 @@ async def run_analysis(
             # ML enrichment
             "role_confidence":         role_confidence,
             "role_alternatives":       role_alternatives,
+            "role_probabilities":      role_probabilities,
+            "top_predictive_skills":   top_predictive_skills,
             "skill_categories":        skill_categories,
             "missing_skills_ranked":   missing_skills_ranked,
             "model_version":           _MODEL_VERSION,
