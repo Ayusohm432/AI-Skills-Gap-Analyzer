@@ -22,7 +22,10 @@ passlib[bcrypt]
 slowapi
 email-validator
 requests
+httpx>=0.27.0
 pandas
 kagglehub
 numpy
+google-genai>=1.0.0
+apscheduler>=3.10.0,<4.0
 tensorflow

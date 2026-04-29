@@ -1,0 +1,55 @@
+name: Sync Wiki
+
+# Runs whenever wiki/ content is pushed to main, keeping the
+# GitHub Wiki tab in sync with the wiki/ folder in the repository.
+
+on:
+  push:
+    branches:
+      - development
+    paths:
+      - 'wiki/**'
+
+  # Allow a manual trigger from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          path: main-repo
+
+      - name: Checkout GitHub Wiki repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy wiki pages to wiki repository
+        run: |
+          # Copy every markdown file from wiki/ into the wiki repo root.
+          # GitHub Wiki treats each .md file as a separate page;
+          # Home.md becomes the wiki landing page.
+          cp main-repo/wiki/*.md wiki-repo/
+
+      - name: Commit and push changes
+        working-directory: wiki-repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          # Only commit when there are actual changes
+          if git diff --staged --quiet; then
+            echo "No wiki changes to commit."
+          else
+            git commit -m "docs: sync wiki from main repo [skip ci]"
+            git push
+          fi

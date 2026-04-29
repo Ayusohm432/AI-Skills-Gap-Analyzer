@@ -35,7 +35,15 @@ from slowapi.errors import RateLimitExceeded
 # Load environment variables
 load_dotenv()
 
-from database import analyses_collection, jobs_collection, users_collection, refresh_tokens_collection, analysis_jobs_collection
+from database import (
+    analyses_collection, 
+    jobs_collection, 
+    users_collection, 
+    refresh_tokens_collection, 
+    analysis_jobs_collection,
+    interview_sessions_collection,
+    ensure_indexes
+)
 from nlp.engine import (
     extract_text_from_pdf, 
     extract_skills_from_text,
@@ -44,11 +52,23 @@ from nlp.engine import (
     generate_roadmap, 
     generate_interview_questions
 )
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from security import get_current_user
 from routes import auth, user
 from routes import jobs
 from routes import interview
 from routes import models as models_router
+from routes import github as github_router
+from routes import market as market_router
+from routes import progress as progress_router
+from routes import alerts as alerts_router
+from routes import benchmark as benchmark_router
+from routes import feedback as feedback_router
+from routes import monitoring as monitoring_router
+from services.market_service import seed_market_data, refresh_all_roles
+from services.alerts_service import check_and_generate_alerts
+from services.monitoring_service import weekly_monitoring_job
 
 # ── Keep-alive ping (Render free tier) ──────────────────────────────────────
 def keep_alive():
@@ -88,8 +108,31 @@ async def lifespan(app: FastAPI):
     await analyses_collection.create_index("predicted_role")
     await analyses_collection.create_index("model_version")
     await analyses_collection.create_index("user_id")
+    # Phase 4 Extension — compound index for benchmarking aggregation (role + user)
+    await analyses_collection.create_index([("predicted_role", 1), ("user_id", 1)])
 
-    # 3. Load ML models in a thread pool so we don't block the event loop.
+    # Phase 5 — Progress tracking indexes
+    from database import user_progress_collection as _upc
+    await _upc.create_index("user_id", unique=True)
+
+    # Phase 5 Extension — Alerts indexes
+    from database import market_subscriptions_collection as _msc, market_alerts_collection as _mac
+    await _msc.create_index([("user_id", 1), ("role", 1)], unique=True)
+    await _mac.create_index("user_id")
+    await _mac.create_index("alert_id")
+
+    # Phase 5 Extension — Skill domain cache index
+    from database import skill_domain_cache_collection as _sdc
+    await _sdc.create_index("skill", unique=True)
+
+    # Phase 2 Extension — Feedback index
+    from database import analysis_feedback_collection as _afc
+    await _afc.create_index("job_id", unique=True)
+
+    # 3. Mock Interview indexes (TTL index for automatic session expiry)
+    await ensure_indexes()
+
+    # 4. Load ML models in a thread pool so we don't block the event loop.
     #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
     loop = asyncio.get_running_loop()
     try:
@@ -100,9 +143,51 @@ async def lifespan(app: FastAPI):
 
     app.state.ml_models = bundle
 
+    # 5. Phase 4 — Market demand: seed collection on startup (non-blocking)
+    try:
+        await seed_market_data()
+    except Exception as exc:
+        logger.warning("Market seed failed (non-fatal): %s", exc)
+
+    # 6. APScheduler — weekly market data refresh (every Monday 02:00 UTC)
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        refresh_all_roles,
+        trigger="cron",
+        day_of_week="mon",
+        hour=2,
+        minute=0,
+        id="weekly_market_refresh",
+        replace_existing=True,
+    )
+    # After market refresh, check subscriptions and emit alerts
+    scheduler.add_job(
+        check_and_generate_alerts,
+        trigger="cron",
+        day_of_week="mon",
+        hour=2,
+        minute=30,
+        id="weekly_alert_generation",
+        replace_existing=True,
+    )
+    # ML Health Monitoring — Audit model performance and check for drift
+    scheduler.add_job(
+        weekly_monitoring_job,
+        trigger="cron",
+        day_of_week="sun",
+        hour=23,
+        minute=0,
+        id="weekly_ml_monitoring",
+        replace_existing=True,
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+    logger.info("APScheduler started — weekly market refresh scheduled (Mon 02:00 UTC)")
+
     yield  # ← app is running here
 
-    # Shutdown: nothing special required for sklearn/keras models
+    # Shutdown
+    scheduler.shutdown(wait=False)
     logging.getLogger("ml_loader").info("Shutting down – ML models released.")
 
 
@@ -148,6 +233,13 @@ app.include_router(user.router, prefix="/api/v1/user", tags=["User Profile"])
 app.include_router(jobs.router, prefix="/api/v1", tags=["Resume Analysis"])
 app.include_router(interview.router, prefix="/api/v1", tags=["Interview Prep"])
 app.include_router(models_router.router, prefix="/api/v1", tags=["Model Versioning"])
+app.include_router(github_router.router, prefix="/api/v1", tags=["GitHub Integration"])
+app.include_router(market_router.router,    prefix="/api/v1", tags=["Market Demand"])
+app.include_router(benchmark_router.router, prefix="/api/v1", tags=["Market Demand"])
+app.include_router(progress_router.router,  prefix="/api/v1", tags=["Progress & Achievements"])
+app.include_router(alerts_router.router,    prefix="/api/v1", tags=["Market Alerts"])
+app.include_router(feedback_router.router,  prefix="/api/v1", tags=["Resume Analysis"])
+app.include_router(monitoring_router.router,prefix="/api/v1", tags=["Model Versioning"])
 
 
 @app.get("/health", tags=["Health"])
