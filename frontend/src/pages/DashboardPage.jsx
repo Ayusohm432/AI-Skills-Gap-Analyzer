@@ -1,16 +1,18 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, PieChart, Pie } from "recharts";
 import { jsPDF } from 'jspdf';
 import {
   CheckCircle2, XCircle, Zap, Download, MessageSquare,
-  ChevronRight, ArrowLeft, BookOpen, Loader2, Target, BarChart2, Activity, Filter, RefreshCw
+  ChevronRight, ArrowLeft, BookOpen, Loader2, Target, BarChart2, Activity, Filter, RefreshCw,
+  Check, ExternalLink, Clock, Trophy, Bot
 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import PageTransition from "../components/PageTransition";
+import InterviewPanel from "../components/InterviewPanel";
 import { secureFetch } from "../api/base";
 
 const fadeUp = (delay = 0) => ({
@@ -41,6 +43,9 @@ export default function DashboardPage() {
   const [selectedCategory, setSelectedCategory] = useState(null); // donut filter
   const [isSwapping, setIsSwapping] = useState(false); // role swap loading
   const [swapError, setSwapError] = useState(null);
+  
+  // Issue #53: Interview Panel State
+  const [isInterviewActive, setIsInterviewActive] = useState(false);
   const swapPollRef = useRef(null);
   const prefersReducedMotion = useReducedMotion();
 
@@ -107,6 +112,60 @@ export default function DashboardPage() {
       });
     }
   }, []);
+
+  // ── Roadmap completion tracking (Issue #52) ──────────────────────────
+  const [completedWeeks, setCompletedWeeks] = useState(() => {
+    try {
+      const saved = localStorage.getItem("roadmapCompletedWeeks");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  // Reset completed weeks when data changes (e.g. after role swap)
+  const prevAnalysisId = useRef(null);
+  useEffect(() => {
+    const currentId = data?.analysis_id;
+    if (currentId && currentId !== prevAnalysisId.current) {
+      prevAnalysisId.current = currentId;
+      // Try to load from localStorage for this analysis
+      try {
+        const saved = localStorage.getItem(`roadmapCompleted_${currentId}`);
+        setCompletedWeeks(saved ? new Set(JSON.parse(saved)) : new Set());
+      } catch { setCompletedWeeks(new Set()); }
+    }
+  }, [data?.analysis_id]);
+
+  const toggleWeekComplete = useCallback((weekIdx) => {
+    setCompletedWeeks(prev => {
+      const next = new Set(prev);
+      if (next.has(weekIdx)) {
+        next.delete(weekIdx);
+      } else {
+        next.add(weekIdx);
+      }
+
+      // Persist to localStorage
+      const arr = [...next];
+      localStorage.setItem("roadmapCompletedWeeks", JSON.stringify(arr));
+      if (data?.analysis_id) {
+        localStorage.setItem(`roadmapCompleted_${data.analysis_id}`, JSON.stringify(arr));
+      }
+
+      // Persist to backend (fire-and-forget)
+      if (data?.analysis_id) {
+        secureFetch('/api/v1/user/roadmap-progress', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            analysis_id: data.analysis_id,
+            completed_weeks: arr,
+          }),
+        }).catch(() => {}); // silent fail — localStorage is primary
+      }
+
+      return next;
+    });
+  }, [data?.analysis_id]);
 
   if (!data) {
     return (
@@ -683,10 +742,11 @@ export default function DashboardPage() {
                     </motion.div>
                   )}
 
-                {/* Roadmap */}
+                {/* Roadmap — Interactive Timeline */}
                 <motion.div {...fadeUp(0.2)} className="glass-card p-8 noise-overlay overflow-hidden relative">
                   <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-8">
+                    {/* Header row */}
+                    <div className="flex items-center justify-between mb-6">
                       <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-[var(--accent-warm-dim)] flex items-center justify-center">
                           <Zap size={18} className="text-[var(--accent-warm)]" />
@@ -707,46 +767,166 @@ export default function DashboardPage() {
                       </button>
                     </div>
 
-                    {/* Timeline */}
-                    <div className="relative ml-4 space-y-6">
-                      {/* Vertical line */}
-                      <div className="absolute left-0 top-3 bottom-3 w-px bg-[var(--border-subtle)]" />
-
-                      {data.roadmap?.length === 0 && (
-                        <p className="pl-8 text-[var(--text-muted)] text-sm">No roadmap needed — you're already there!</p>
-                      )}
-
-                      {data.roadmap?.map((step, idx) => (
-                        <motion.div
-                          key={idx}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.3 + idx * 0.1 }}
-                          className="relative pl-8 group"
-                        >
-                          {/* Dot */}
-                          <div className="absolute w-3 h-3 rounded-full -left-[6px] top-[18px] border-2 border-[var(--border-subtle)] bg-[var(--bg-surface)] group-hover:border-[var(--accent-warm)] group-hover:bg-[var(--accent-warm)] transition-all duration-300 group-hover:shadow-[0_0_12px_rgba(232,168,73,0.4)]" />
-
-                          <div className="bg-[var(--bg-deep)]/60 border border-[var(--border-subtle)] rounded-xl p-6 hover:border-[var(--border-hover)] transition-all duration-300 group-hover:-translate-y-0.5">
-                            <div className="flex items-center gap-3 mb-3">
-                              <span className="px-2.5 py-1 bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-xs font-semibold rounded-md">
-                                Phase {idx + 1}
+                    {/* Progress summary bar */}
+                    {data.roadmap?.length > 0 && (() => {
+                      const total = data.roadmap.length;
+                      const done = completedWeeks.size;
+                      const pct = Math.round((done / total) * 100);
+                      return (
+                        <div className="mb-8">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              {done === total ? (
+                                <Trophy size={14} className="text-[var(--accent-warm)]" />
+                              ) : (
+                                <Clock size={14} className="text-[var(--text-muted)]" />
+                              )}
+                              <span className="text-xs font-medium text-[var(--text-secondary)]">
+                                {done === total
+                                  ? "Roadmap Complete! 🎉"
+                                  : `${done} of ${total} phases completed`}
                               </span>
-                              <span className="text-xs text-[var(--text-muted)]">{step.week}</span>
                             </div>
-                            <h4 className="text-base font-semibold text-[var(--text-primary)] mb-3">{step.focus}</h4>
-                            <ul className="space-y-2">
-                              {step.resources?.map((res, rIdx) => (
-                                <li key={rIdx} className="flex items-start gap-2.5 text-sm text-[var(--text-secondary)] group/item">
-                                  <ChevronRight size={14} className="shrink-0 mt-0.5 text-[var(--text-muted)] group-hover/item:text-[var(--accent-warm)] transition-colors" />
-                                  <span className="group-hover/item:text-[var(--text-primary)] transition-colors">{res}</span>
-                                </li>
-                              ))}
-                            </ul>
+                            <span className={`text-xs font-bold ${
+                              pct === 100 ? 'text-[var(--accent-warm)]' :
+                              pct >= 50  ? 'text-[var(--accent-teal)]' :
+                                           'text-[var(--text-muted)]'
+                            }`}>{pct}%</span>
                           </div>
-                        </motion.div>
-                      ))}
-                    </div>
+                          <div className="roadmap-progress-bar">
+                            <div className="roadmap-progress-fill" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Empty state */}
+                    {data.roadmap?.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <Trophy size={32} className="text-[var(--accent-teal)] mb-3" />
+                        <p className="text-sm font-medium text-[var(--accent-teal)]">No roadmap needed — you're already there!</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-1">Your skills fully cover this role's requirements.</p>
+                      </div>
+                    )}
+
+                    {/* Timeline */}
+                    {data.roadmap?.length > 0 && (
+                      <div className="relative" style={{ paddingLeft: '16px' }}>
+                        {/* Vertical connector line */}
+                        <div className="timeline-connector" />
+                        {/* Animated fill based on completion */}
+                        <div
+                          className="timeline-connector-fill"
+                          style={{
+                            height: data.roadmap.length > 0
+                              ? `${(completedWeeks.size / data.roadmap.length) * 100}%`
+                              : '0%'
+                          }}
+                        />
+
+                        <div className="space-y-5">
+                          {data.roadmap.map((step, idx) => {
+                            const isDone = completedWeeks.has(idx);
+                            // Parse resource strings: "Platform: https://..." → { platform, url }
+                            const parsedResources = (step.resources || []).map(raw => {
+                              const colonIdx = raw.indexOf(': http');
+                              if (colonIdx > -1) {
+                                const platform = raw.substring(0, colonIdx).trim();
+                                const url = raw.substring(colonIdx + 2).trim();
+                                return { platform, url };
+                              }
+                              // Try to detect bare URLs
+                              const urlMatch = raw.match(/(https?:\/\/[^\s]+)/);
+                              if (urlMatch) {
+                                return { platform: 'Link', url: urlMatch[1] };
+                              }
+                              return { platform: raw, url: null };
+                            });
+
+                            const platformClass = (p) => {
+                              const lower = p.toLowerCase();
+                              if (lower.includes('coursera')) return 'resource-link-coursera';
+                              if (lower.includes('youtube'))  return 'resource-link-youtube';
+                              return 'resource-link-generic';
+                            };
+
+                            return (
+                              <motion.div
+                                key={`roadmap-${idx}`}
+                                initial={prefersReducedMotion ? false : { opacity: 0, x: -12 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.2 + idx * 0.08, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                                className="flex gap-4 items-start"
+                              >
+                                {/* Timeline node (click to toggle) */}
+                                <button
+                                  onClick={() => toggleWeekComplete(idx)}
+                                  className={`timeline-node ${isDone ? 'completed' : ''}`}
+                                  title={isDone ? 'Mark as incomplete' : 'Mark as complete'}
+                                  aria-label={isDone ? `Unmark phase ${idx + 1}` : `Mark phase ${idx + 1} complete`}
+                                >
+                                  {isDone ? (
+                                    <Check size={16} className="text-white timeline-check-icon" strokeWidth={3} />
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-[var(--text-muted)]">{idx + 1}</span>
+                                  )}
+                                </button>
+
+                                {/* Card */}
+                                <div className={`flex-1 min-w-0 bg-[var(--bg-deep)]/60 border border-[var(--border-subtle)] rounded-xl p-5 transition-all duration-300 hover:border-[var(--border-hover)] hover:-translate-y-0.5 ${isDone ? 'timeline-card-complete' : ''}`}>
+                                  {/* Phase badge + week label */}
+                                  <div className="flex items-center gap-3 mb-3">
+                                    <span className={`px-2.5 py-1 text-xs font-semibold rounded-md ${
+                                      isDone
+                                        ? 'bg-[var(--accent-teal-dim)] text-[var(--accent-teal)]'
+                                        : 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)]'
+                                    }`}>
+                                      Phase {idx + 1}
+                                    </span>
+                                    <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
+                                      <Clock size={10} />
+                                      {step.week}
+                                    </span>
+                                    {isDone && (
+                                      <span className="ml-auto text-[10px] font-medium text-[var(--accent-teal)] bg-[var(--accent-teal-dim)] px-2 py-0.5 rounded-md">
+                                        ✓ Completed
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Focus title */}
+                                  <h4 className={`text-base font-semibold text-[var(--text-primary)] mb-4 timeline-focus`}>
+                                    {step.focus}
+                                  </h4>
+
+                                  {/* Resource links */}
+                                  <div className="flex flex-wrap gap-2">
+                                    {parsedResources.map((res, rIdx) => (
+                                      res.url ? (
+                                        <a
+                                          key={rIdx}
+                                          href={res.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className={`resource-link ${platformClass(res.platform)}`}
+                                        >
+                                          {res.platform}
+                                          <ExternalLink size={10} />
+                                        </a>
+                                      ) : (
+                                        <span key={rIdx} className="resource-link resource-link-generic">
+                                          {res.platform}
+                                        </span>
+                                      )
+                                    ))}
+                                  </div>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               </div>
@@ -1081,12 +1261,22 @@ export default function DashboardPage() {
                 {/* Interview Prep */}
                 <motion.div {...fadeUp(0.25)} className="glass-card p-8 noise-overlay overflow-hidden relative">
                   <div className="relative z-10">
-                    <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-3 mb-8">
-                      <div className="w-9 h-9 rounded-xl bg-[var(--accent-lavender-dim)] flex items-center justify-center">
-                        <MessageSquare size={18} className="text-[var(--accent-lavender)]" />
-                      </div>
-                      Interview Prep
-                    </h2>
+                    <div className="flex items-center justify-between mb-8">
+                      <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[var(--accent-lavender-dim)] flex items-center justify-center">
+                          <MessageSquare size={18} className="text-[var(--accent-lavender)]" />
+                        </div>
+                        Interview Prep
+                      </h2>
+                      {data.interview_questions?.length > 0 && (
+                        <button
+                          onClick={() => setIsInterviewActive(true)}
+                          className="flex items-center gap-2 text-xs font-medium px-4 py-2 rounded-lg bg-[var(--accent-lavender)] text-white hover:bg-[var(--accent-lavender)]/90 transition-all shadow-sm shadow-[var(--accent-lavender)]/20"
+                        >
+                          <Bot size={14} /> Start Mock Interview
+                        </button>
+                      )}
+                    </div>
 
                     <div className="space-y-3">
                       {data.interview_questions?.length === 0 && (
@@ -1098,6 +1288,7 @@ export default function DashboardPage() {
                           initial={{ opacity: 0, x: 10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: 0.4 + idx * 0.08 }}
+                          onClick={() => setIsInterviewActive(true)}
                           className="group bg-[var(--bg-deep)]/60 border border-[var(--border-subtle)] p-4 rounded-xl hover:border-[var(--accent-lavender)]/30 transition-all duration-300 cursor-pointer flex gap-3 items-start hover:bg-[var(--accent-lavender-dim)]"
                         >
                           <div className="w-7 h-7 rounded-lg bg-[var(--accent-lavender-dim)] flex items-center justify-center text-[var(--accent-lavender)] text-xs font-bold shrink-0 group-hover:bg-[var(--accent-lavender)]/20 transition-colors">
@@ -1135,6 +1326,18 @@ export default function DashboardPage() {
         </div>
 
         <Footer />
+        
+        {/* Mock Interview Panel */}
+        <AnimatePresence>
+          {isInterviewActive && data.interview_questions && (
+            <InterviewPanel
+              isOpen={isInterviewActive}
+              onClose={() => setIsInterviewActive(false)}
+              analysisId={data.analysis_id}
+              role={data.predicted_role}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </PageTransition>
   );

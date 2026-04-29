@@ -49,6 +49,7 @@ class UserInDB(UserBase):
     analysis_history: List[PyObjectId] = []
     target_role: Optional[str] = None
     skills: List[str] = []
+    github_username: Optional[str] = None
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -61,7 +62,8 @@ class UserInDB(UserBase):
                 "hashed_password": "somehashedpassword",
                 "analysis_history": [],
                 "target_role": "Backend Developer",
-                "skills": ["Python", "FastAPI"]
+                "skills": ["Python", "FastAPI"],
+                "github_username": "octocat"
             }
         }
     )
@@ -73,6 +75,7 @@ class UserResponse(UserBase):
     analysis_history: List[PyObjectId] = []
     target_role: Optional[str] = None
     skills: List[str] = []
+    github_username: Optional[str] = None
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -87,7 +90,8 @@ class UserResponse(UserBase):
                 "updated_at": "2023-01-01T12:00:00Z",
                 "analysis_history": [],
                 "target_role": "Backend Developer",
-                "skills": ["Python", "FastAPI"]
+                "skills": ["Python", "FastAPI"],
+                "github_username": "octocat"
             }
         }
     )
@@ -120,6 +124,7 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     target_role: Optional[str] = None
     skills: Optional[List[str]] = None
+    github_username: Optional[str] = None
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -128,7 +133,8 @@ class UserUpdate(BaseModel):
             "example": {
                 "name": "Updated User Name",
                 "target_role": "Full-Stack Developer",
-                "skills": ["Python", "FastAPI", "React", "MongoDB"]
+                "skills": ["Python", "FastAPI", "React", "MongoDB"],
+                "github_username": "octocat"
             }
         }
     )
@@ -182,6 +188,7 @@ class AnalysisResult(BaseModel):
     model_version          – version string matching ML_MODEL_VERSION env var
     """
     # ── Core ──────────────────────────────────────────────────────────
+    analysis_id:          Optional[str] = Field(default=None, description="The DB ID of the generated analysis")
     predicted_role:       str          = Field(description="The ML/NLP-predicted (or user-selected) role")
     skills_detected:      List[str]
     skill_confidences:    dict                     = Field(default_factory=dict,
