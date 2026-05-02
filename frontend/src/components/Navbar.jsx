@@ -24,6 +24,7 @@ export default function Navbar() {
   const navLinks = [
     { to: '/upload', label: 'Analyze Resume' },
     { to: '/dashboard', label: 'Dashboard' },
+    { to: '/market', label: 'Market Insights' },
   ];
 
   if (isAuthenticated) {

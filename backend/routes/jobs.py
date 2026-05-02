@@ -197,6 +197,7 @@ async def get_job_status(
         # Use model_validate so every Pydantic field (core + ML enrichment)
         # is populated automatically; unknown keys are simply ignored.
         result = AnalysisResult.model_validate({
+            "analysis_id":            raw.get("analysis_id"),
             "predicted_role":         raw.get("predicted_role", ""),
             "skills_detected":        raw.get("skills_detected", []),
             "skill_confidences":      raw.get("skill_confidences", {}),
