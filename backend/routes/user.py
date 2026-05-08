@@ -139,3 +139,14 @@ async def get_roadmap_progress(
         raise HTTPException(status_code=403, detail="Not your analysis")
 
     return {"completed_weeks": doc.get("completed_weeks", [])}
+
+@router.delete("/me/github", summary="Revoke and delete stored GitHub token")
+async def delete_github_token(current_user: dict = Depends(get_current_user)):
+    """
+    Remove the stored GitHub access and refresh tokens for the current user.
+    """
+    await users_collection.update_one(
+        {"_id": ObjectId(current_user["id"])},
+        {"$unset": {"github_access_token": "", "github_refresh_token": ""}}
+    )
+    return {"message": "GitHub access revoked and token deleted."}

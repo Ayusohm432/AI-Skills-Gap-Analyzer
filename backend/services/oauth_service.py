@@ -34,7 +34,8 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, status
 
 from database import users_collection
-from security import create_access_token, create_refresh_token
+from security import create_access_token, create_refresh_token, encrypt_token
+
 from database import refresh_tokens_collection
 
 load_dotenv()
@@ -238,13 +239,16 @@ async def github_exchange_code(code: str) -> dict:
         )
 
     return {
-        "email":           email,
-        "name":            profile.get("name") or profile.get("login"),
-        "github_username": profile.get("login"),
-        "picture":         profile.get("avatar_url"),
-        "provider_id":     str(profile.get("id")),
-        "provider":        "github",
+        "email":                email,
+        "name":                 profile.get("name") or profile.get("login"),
+        "github_username":      profile.get("login"),
+        "picture":              profile.get("avatar_url"),
+        "provider_id":          str(profile.get("id")),
+        "provider":             "github",
+        "github_access_token":  access_token,
+        "github_refresh_token": token_data.get("refresh_token"),
     }
+
 
 
 # ── Shared upsert + token issuance ────────────────────────────────────────────
@@ -271,6 +275,9 @@ async def upsert_oauth_user(user_info: dict) -> tuple[str, str, str]:
     name        = user_info.get("name")
     picture     = user_info.get("picture")
     github_username = user_info.get("github_username")
+    gh_access_token = user_info.get("github_access_token")
+    gh_refresh_token = user_info.get("github_refresh_token")
+
 
     # ── 1. Fast path: look up by provider + provider_id ──────────────────────
     existing = await users_collection.find_one({
@@ -288,6 +295,11 @@ async def upsert_oauth_user(user_info: dict) -> tuple[str, str, str]:
             update_fields["picture"] = picture
         if github_username:
             update_fields["github_username"] = github_username
+        if gh_access_token:
+            update_fields["github_access_token"] = encrypt_token(gh_access_token)
+        if gh_refresh_token:
+            update_fields["github_refresh_token"] = encrypt_token(gh_refresh_token)
+
         if update_fields:
             from datetime import datetime
             update_fields["updated_at"] = datetime.utcnow()
@@ -318,6 +330,11 @@ async def upsert_oauth_user(user_info: dict) -> tuple[str, str, str]:
                 link_update["picture"] = picture
             if github_username:
                 link_update["github_username"] = github_username
+            if gh_access_token:
+                link_update["github_access_token"] = encrypt_token(gh_access_token)
+            if gh_refresh_token:
+                link_update["github_refresh_token"] = encrypt_token(gh_refresh_token)
+
             await users_collection.update_one(
                 {"_id": existing_by_email["_id"]},
                 {"$set": link_update},
@@ -341,6 +358,11 @@ async def upsert_oauth_user(user_info: dict) -> tuple[str, str, str]:
             }
             if github_username:
                 new_user_doc["github_username"] = github_username
+            if gh_access_token:
+                new_user_doc["github_access_token"] = encrypt_token(gh_access_token)
+            if gh_refresh_token:
+                new_user_doc["github_refresh_token"] = encrypt_token(gh_refresh_token)
+
 
             result = await users_collection.insert_one(new_user_doc)
             user_id = str(result.inserted_id)

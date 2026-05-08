@@ -19,6 +19,38 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
+# Encryption for sensitive data at rest (e.g. GitHub OAuth tokens)
+
+from cryptography.fernet import Fernet
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+if not ENCRYPTION_KEY:
+    # Fallback to a derived key from SECRET_KEY if ENCRYPTION_KEY is missing
+    # In production, this should be a proper 32-byte base64 encoded string.
+    import base64
+    import hashlib
+    # Generate a deterministic 32-byte key from SECRET_KEY
+    key_32 = hashlib.sha256(SECRET_KEY.encode()).digest()
+    ENCRYPTION_KEY = base64.urlsafe_b64encode(key_32).decode()
+
+cipher_suite = Fernet(ENCRYPTION_KEY.encode())
+
+def encrypt_token(token: str) -> str:
+    """Encrypt a string token using Fernet."""
+    if not token:
+        return ""
+    return cipher_suite.encrypt(token.encode()).decode()
+
+def decrypt_token(encrypted_token: str) -> str:
+    """Decrypt a Fernet-encrypted string."""
+    if not encrypted_token:
+        return ""
+    try:
+        return cipher_suite.decrypt(encrypted_token.encode()).decode()
+    except Exception:
+        # If decryption fails (e.g. key changed), return empty
+        return ""
+
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/token")
 
 import bcrypt

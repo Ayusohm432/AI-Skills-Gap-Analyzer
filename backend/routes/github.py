@@ -41,7 +41,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from models import GithubAnalyzeRequest, GithubAnalyzeResponse
 from nlp.engine import KNOWN_SKILLS, categorize_skills
-from security import get_current_user
+from security import get_current_user, decrypt_token, encrypt_token
+from database import users_collection
+from bson import ObjectId
+
 
 logger = logging.getLogger("routes.github")
 
@@ -138,15 +141,18 @@ _LANG_TO_SKILL: dict[str, str] = {
 
 # ── GitHub API client helpers ─────────────────────────────────────────────────
 
-def _build_headers() -> dict[str, str]:
+def _build_headers(token: str | None = None) -> dict[str, str]:
     """Return HTTP headers for GitHub API requests."""
     headers: dict[str, str] = {
         "Accept":     "application/vnd.github+json",
         "User-Agent": "AI-Skills-Gap-Analyzer/1.0",
     }
-    if _GITHUB_TOKEN:
-        headers["Authorization"] = f"Bearer {_GITHUB_TOKEN}"
+    # Priority: user-provided token > environment GITHUB_TOKEN
+    effective_token = token or _GITHUB_TOKEN
+    if effective_token:
+        headers["Authorization"] = f"Bearer {effective_token}"
     return headers
+
 
 
 def _check_rate_limit(response: httpx.Response) -> None:
@@ -186,6 +192,7 @@ async def _fetch_user_repos(
     username: str,
     max_repos: int,
     client: httpx.AsyncClient,
+    token: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Fetch the user's public repositories sorted by star count (descending).
@@ -204,8 +211,9 @@ async def _fetch_user_repos(
     }
 
     try:
-        resp = await client.get(url, params=params, headers=_build_headers())
+        resp = await client.get(url, params=params, headers=_build_headers(token))
     except httpx.TimeoutException:
+
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="GitHub API request timed out. Please try again.",
@@ -248,6 +256,7 @@ async def _fetch_repo_topics(
     username: str,
     repo_name: str,
     client: httpx.AsyncClient,
+    token: str | None = None,
 ) -> list[str]:
     """
     Fetch repository topic tags via the GitHub topics API.
@@ -255,10 +264,12 @@ async def _fetch_repo_topics(
     """
     url = f"{_GITHUB_API_BASE}/repos/{username}/{repo_name}/topics"
     try:
-        resp = await client.get(url, headers={**_build_headers(), "Accept": "application/vnd.github.mercy-preview+json"})
+        headers = {**_build_headers(token), "Accept": "application/vnd.github.mercy-preview+json"}
+        resp = await client.get(url, headers=headers)
         if resp.status_code == 200:
             return resp.json().get("names", [])
     except Exception as exc:
+
         logger.debug("Topic fetch failed for %s/%s: %s", username, repo_name, exc)
     return []
 
@@ -324,7 +335,53 @@ def _merge_skills(
     return merged
 
 
+async def _refresh_github_token(user_id: str, refresh_token: str) -> str:
+    """
+    Attempt to refresh the GitHub access token using the stored refresh token.
+    Updates the user document in MongoDB with the new tokens.
+    """
+    from services.oauth_service import GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, _GITHUB_TOKEN_URL
+    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+        logger.error("GitHub refresh failed: Missing Client ID or Secret")
+        return ""
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.post(
+                _GITHUB_TOKEN_URL,
+                headers={"Accept": "application/json"},
+                data={
+                    "client_id":     GITHUB_CLIENT_ID,
+                    "client_secret": GITHUB_CLIENT_SECRET,
+                    "refresh_token": refresh_token,
+                    "grant_type":    "refresh_token",
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                new_access = data.get("access_token")
+                new_refresh = data.get("refresh_token")
+                if new_access:
+                    update_fields = {"github_access_token": encrypt_token(new_access)}
+                    if new_refresh:
+                        update_fields["github_refresh_token"] = encrypt_token(new_refresh)
+                    
+                    await users_collection.update_one(
+                        {"_id": ObjectId(user_id)},
+                        {"$set": update_fields}
+                    )
+                    logger.info("GitHub access token refreshed for user %s", user_id)
+                    return new_access
+            else:
+                logger.warning("GitHub refresh failed: %s %s", resp.status_code, resp.text)
+        except Exception as exc:
+            logger.error("GitHub refresh exception: %s", exc)
+    
+    return ""
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────────
+
 
 @router.post(
     "/analyze/github",
@@ -369,9 +426,31 @@ async def analyze_github_profile(
         current_user["id"], username, max_repos, len(body.resume_skills),
     )
 
+    # ── Token handling ────────────────────────────────────────────────
+    # Fetch user's stored token if available
+    encrypted_token = current_user.get("github_access_token")
+    token = decrypt_token(encrypted_token) if encrypted_token else None
+
     # ── Fetch repositories ────────────────────────────────────────────
     async with httpx.AsyncClient(timeout=_GITHUB_TIMEOUT) as client:
-        repos = await _fetch_user_repos(username, max_repos, client)
+        try:
+            repos = await _fetch_user_repos(username, max_repos, client, token)
+        except HTTPException as exc:
+            # Handle token expiration (401)
+            if exc.status_code == 401 and current_user.get("github_refresh_token"):
+                logger.info("GitHub 401: Attempting token refresh for user %s", current_user["id"])
+                new_token = await _refresh_github_token(
+                    current_user["id"], 
+                    decrypt_token(current_user["github_refresh_token"])
+                )
+                if new_token:
+                    # Retry once with the fresh token
+                    repos = await _fetch_user_repos(username, max_repos, client, new_token)
+                    token = new_token  # use for topics too
+                else:
+                    raise exc
+            else:
+                raise exc
 
         # ── Aggregate language byte-counts ────────────────────────────
         language_totals: dict[str, int] = {}
@@ -384,8 +463,9 @@ async def analyze_github_profile(
                 language_totals[lang] = language_totals.get(lang, 0) + 1
 
             # Topics (best-effort per-repo call — skip on rate limit)
-            repo_topics = await _fetch_repo_topics(username, repo["name"], client)
+            repo_topics = await _fetch_repo_topics(username, repo["name"], client, token)
             all_topics.extend(repo_topics)
+
 
     # Deduplicate topics while preserving order
     seen_topics: set[str] = set()

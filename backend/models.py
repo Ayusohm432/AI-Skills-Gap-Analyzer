@@ -58,6 +58,9 @@ class UserInDB(UserBase):
     oauth_provider_id: Optional[str] = None
     email_verified: bool = False
     picture: Optional[str] = None
+    github_access_token: Optional[str] = Field(default=None, description="Encrypted GitHub OAuth token")
+    github_refresh_token: Optional[str] = Field(default=None, description="Encrypted GitHub OAuth refresh token")
+
 
     model_config = ConfigDict(
         populate_by_name=True,
