@@ -37,6 +37,10 @@ skill_domain_cache_collection   = db["skill_domain_cache"]
 # Phase 2 Extension — User Feedback for ML Retraining
 analysis_feedback_collection    = db["analysis_feedback"]
 
+# Market Insights Extension — companies & work-mode breakdown per role
+market_meta_collection          = db["market_meta"]
+
+
 async def ensure_indexes():
     """Ensure necessary indexes exist in the database."""
     # TTL index for interview sessions: expire 30 minutes after updated_at

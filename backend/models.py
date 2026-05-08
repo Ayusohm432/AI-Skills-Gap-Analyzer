@@ -528,3 +528,65 @@ class ReadinessLevelResponse(BaseModel):
     intermediate: Optional[ReadinessLevel] = None
     advanced: Optional[ReadinessLevel] = None
     no_analysis: bool = False
+
+
+# ── Market Companies & Work Mode Models ────────────────────────────────────
+
+class CompanyInfo(BaseModel):
+    name:      str = Field(description="Company name")
+    logo_url:  str = Field(description="URL to the company's logo image")
+    job_count: int = Field(description="Approximate number of open positions for this role")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name":      "Google",
+                "logo_url":  "https://logo.clearbit.com/google.com",
+                "job_count": 120,
+            }
+        }
+    }
+
+
+class TopCompaniesResponse(BaseModel):
+    role:      str              = Field(description="Target job role queried")
+    companies: List[CompanyInfo] = Field(description="Top hiring companies for the role (up to 5)")
+    data_source: str            = Field(default="seeded", description="'seeded' | 'live'")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "role": "Backend Developer",
+                "data_source": "seeded",
+                "companies": [
+                    {"name": "Google",    "logo_url": "https://logo.clearbit.com/google.com",    "job_count": 120},
+                    {"name": "Amazon",   "logo_url": "https://logo.clearbit.com/amazon.com",    "job_count": 95},
+                    {"name": "Flipkart", "logo_url": "https://logo.clearbit.com/flipkart.com", "job_count": 80},
+                    {"name": "Razorpay", "logo_url": "https://logo.clearbit.com/razorpay.com", "job_count": 45},
+                    {"name": "Swiggy",   "logo_url": "https://logo.clearbit.com/swiggy.com",   "job_count": 38},
+                ],
+            }
+        }
+    }
+
+
+class WorkModeBreakdown(BaseModel):
+    remote: float  = Field(ge=0.0, le=100.0, description="Percentage of remote positions")
+    hybrid: float  = Field(ge=0.0, le=100.0, description="Percentage of hybrid positions")
+    onsite: float  = Field(ge=0.0, le=100.0, description="Percentage of onsite positions")
+
+
+class WorkModeResponse(BaseModel):
+    role:        str               = Field(description="Target job role queried")
+    breakdown:   WorkModeBreakdown = Field(description="Work mode percentage breakdown")
+    data_source: str               = Field(default="seeded", description="'seeded' | 'live'")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "role": "Backend Developer",
+                "data_source": "seeded",
+                "breakdown": {"remote": 35.0, "hybrid": 45.0, "onsite": 20.0},
+            }
+        }
+    }
