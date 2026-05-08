@@ -43,8 +43,10 @@ from database import (
     refresh_tokens_collection, 
     analysis_jobs_collection,
     interview_sessions_collection,
+    market_meta_collection,
     ensure_indexes
 )
+
 from nlp.engine import (
     extract_text_from_pdf, 
     extract_skills_from_text,
@@ -156,6 +158,25 @@ async def lifespan(app: FastAPI):
         await seed_market_data()
     except Exception as exc:
         logger.warning("Market seed failed (non-fatal): %s", exc)
+
+    # 5b. Market meta (companies & work-modes): seed on startup (non-blocking)
+    try:
+        from seed import MARKET_META_SEED
+        from database import market_meta_collection as _mmc
+        for role, meta in MARKET_META_SEED.items():
+            await _mmc.update_one(
+                {"role": role},
+                {"$setOnInsert": {
+                    "role":       role,
+                    "companies":  meta["companies"],
+                    "work_modes": meta["work_modes"],
+                }},
+                upsert=True,
+            )
+        logger.info("market_meta seeded for %d roles", len(MARKET_META_SEED))
+    except Exception as exc:
+        logger.warning("market_meta seed failed (non-fatal): %s", exc)
+
 
     # 6. APScheduler — weekly market data refresh (every Monday 02:00 UTC)
     scheduler = AsyncIOScheduler(timezone="UTC")
