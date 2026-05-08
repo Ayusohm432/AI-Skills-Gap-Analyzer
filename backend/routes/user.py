@@ -35,8 +35,17 @@ async def get_history(current_user: dict = Depends(get_current_user)):
 async def get_profile(current_user: dict = Depends(get_current_user)):
     """
     Returns the current user's profile details.
+
+    BUG FIX: current_user from get_current_user() contains BOTH
+    '_id' (ObjectId) and 'id' (str). When Pydantic v2 encounters both
+    the alias ('_id') and the field name ('id') in the same dict,
+    validation can be ambiguous across patch versions.
+    We remove '_id' after copying its value to 'id' for an unambiguous dict.
     """
-    return current_user
+    # Ensure 'id' is a string and '_id' (ObjectId) is gone
+    profile = dict(current_user)
+    profile["id"] = str(profile.pop("_id", profile.get("id", "")))
+    return profile
 
 @router.put("/profile", response_model=UserResponse)
 async def update_profile(
@@ -47,18 +56,25 @@ async def update_profile(
     Updates the current user's profile information.
     """
     update_data = user_update.dict(exclude_unset=True)
-    
+
     if not update_data:
-        return current_user
-        
+        # Nothing to update — return the current profile (unambiguous dict)
+        profile = dict(current_user)
+        profile["id"] = str(profile.pop("_id", profile.get("id", "")))
+        return profile
+
+    # BUG FIX: always stamp updated_at so the field reflects the actual
+    # last-modification time rather than remaining frozen at account creation.
+    update_data["updated_at"] = datetime.utcnow()
+
     await users_collection.update_one(
         {"email": current_user["email"]},
         {"$set": update_data}
     )
-    
-    # Fetch updated user
+
+    # Fetch updated user and return an unambiguous dict (string 'id', no '_id')
     updated_user = await users_collection.find_one({"email": current_user["email"]})
-    updated_user["id"] = str(updated_user["_id"])
+    updated_user["id"] = str(updated_user.pop("_id"))
     return updated_user
 
 

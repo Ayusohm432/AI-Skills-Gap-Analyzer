@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Request, UploadFile, Form, Depends
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -100,6 +101,11 @@ async def lifespan(app: FastAPI):
 
     # 2. MongoDB indexes
     await users_collection.create_index("email", unique=True)
+    # Sparse index for OAuth provider lookups (not all users have this field)
+    await users_collection.create_index(
+        [("auth_provider", 1), ("oauth_provider_id", 1)],
+        sparse=True,
+    )
     await refresh_tokens_collection.create_index("expires_at", expireAfterSeconds=0)
     # Index job lookups by user (for polling) + TTL auto-expire after 7 days
     await analysis_jobs_collection.create_index("user_id")
@@ -241,6 +247,160 @@ app.include_router(alerts_router.router,    prefix="/api/v1", tags=["Market Aler
 app.include_router(feedback_router.router,  prefix="/api/v1", tags=["Resume Analysis"])
 app.include_router(monitoring_router.router,prefix="/api/v1", tags=["Model Versioning"])
 
+
+@app.get("/", include_in_schema=False)
+def read_root():
+    """Returns a premium, interactive landing page for the API."""
+    return HTMLResponse(content=f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>AI Skill Gap Analyzer | API Dashboard</title>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+        <style>
+            :root {{
+                --primary: #6366f1;
+                --secondary: #a855f7;
+                --bg: #0f172a;
+                --card-bg: rgba(30, 41, 59, 0.7);
+            }}
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{
+                font-family: 'Outfit', sans-serif;
+                background-color: var(--bg);
+                background-image: 
+                    radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
+                    radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.15) 0%, transparent 40%);
+                color: #f8fafc;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                overflow: hidden;
+            }}
+            .container {{
+                text-align: center;
+                padding: 3rem;
+                background: var(--card-bg);
+                backdrop-filter: blur(16px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 2rem;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                max-width: 800px;
+                width: 90%;
+            }}
+            .logo-icon {{
+                font-size: 4rem;
+                margin-bottom: 1rem;
+                background: linear-gradient(135deg, var(--primary), var(--secondary));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                display: inline-block;
+            }}
+            h1 {{
+                font-size: 3rem;
+                font-weight: 800;
+                margin-bottom: 0.5rem;
+                letter-spacing: -0.025em;
+                background: linear-gradient(to right, #fff, #94a3b8);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }}
+            p.tagline {{
+                font-size: 1.1rem;
+                color: #94a3b8;
+                margin-bottom: 2.5rem;
+            }}
+            .grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 1.5rem;
+                margin-bottom: 2.5rem;
+            }}
+            .card {{
+                padding: 1.5rem;
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 1.25rem;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                transition: all 0.3s ease;
+                cursor: pointer;
+                text-decoration: none;
+                color: inherit;
+            }}
+            .card:hover {{
+                background: rgba(255, 255, 255, 0.08);
+                transform: translateY(-5px);
+                border-color: var(--primary);
+            }}
+            .card h3 {{ font-size: 1.2rem; margin-bottom: 0.5rem; color: #fff; }}
+            .card p {{ font-size: 0.875rem; color: #64748b; }}
+            .status-badge {{
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.5rem 1rem;
+                background: rgba(34, 197, 94, 0.1);
+                color: #4ade80;
+                border-radius: 9999px;
+                font-size: 0.875rem;
+                font-weight: 600;
+                margin-top: 1rem;
+            }}
+            .dot {{
+                width: 8px;
+                height: 8px;
+                background: #22c55e;
+                border-radius: 50%;
+                box-shadow: 0 0 10px #22c55e;
+                animation: pulse 2s infinite;
+            }}
+            @keyframes pulse {{
+                0% {{ opacity: 1; transform: scale(1); }}
+                50% {{ opacity: 0.5; transform: scale(1.2); }}
+                100% {{ opacity: 1; transform: scale(1); }}
+            }}
+            footer {{
+                margin-top: 2rem;
+                font-size: 0.75rem;
+                color: #475569;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo-icon">◈</div>
+            <h1>AI Skill Gap Analyzer</h1>
+            <p class="tagline">Empowering careers through deep semantic intelligence.</p>
+            
+            <div class="grid">
+                <a href="/docs" class="card">
+                    <h3>Swagger UI</h3>
+                    <p>Interactive API documentation & testing console.</p>
+                </a>
+                <a href="/redoc" class="card">
+                    <h3>ReDoc</h3>
+                    <p>Clean, comprehensive reference documentation.</p>
+                </a>
+                <a href="/health" class="card">
+                    <h3>System Health</h3>
+                    <p>Check ML model status and service performance.</p>
+                </a>
+            </div>
+
+            <div class="status-badge">
+                <div class="dot"></div>
+                API System Operational v1.0.0
+            </div>
+
+            <footer>
+                Built by Ayush Kumar & Team &bull; Powered by FastAPI & Gemini AI
+            </footer>
+        </div>
+    </body>
+    </html>
+    """)
 
 @app.get("/health", tags=["Health"])
 def health_check():

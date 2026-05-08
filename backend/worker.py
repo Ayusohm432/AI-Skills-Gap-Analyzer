@@ -292,7 +292,7 @@ async def run_analysis(
             seniority=seniority,
         )
         if not interview_qs:
-            # Fallback: use static question bank (no GEMINI_API_KEY or API error)
+            # Fallback: use static question bank (no AI key set or API error)
             logger.warning(
                 "[job=%s] AI interview generation unavailable – using static question bank",
                 job_id,

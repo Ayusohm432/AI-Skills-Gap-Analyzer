@@ -216,6 +216,8 @@ async def _resolve_via_gemini(skill: str) -> str | None:
     Ask Gemini to classify the skill into one of the known domains.
     Returns a domain string or None on failure.
     """
+    from dotenv import load_dotenv
+    load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key or genai is None:
         return None

@@ -106,7 +106,10 @@ async def generate_ai_interview_questions(
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        logger.warning("GEMINI_API_KEY not set; skipping AI question generation")
+        logger.warning(
+            "GEMINI_API_KEY not set; skipping AI question generation. "
+            "Set GEMINI_API_KEY in .env to enable this feature."
+        )
         return None
 
     prompt = _build_prompt(role, identified_skills, missing_skills, readiness_score, seniority)

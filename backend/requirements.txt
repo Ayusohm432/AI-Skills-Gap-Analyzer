@@ -28,4 +28,7 @@ kagglehub
 numpy
 google-genai>=1.0.0
 apscheduler>=3.10.0,<4.0
-tensorflow
+# ── Authentication additions ──────────────────────────────────────────────────
+itsdangerous>=2.1.0
+supabase>=2.0.0
+# tensorflow
