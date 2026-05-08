@@ -78,6 +78,42 @@ logger = logging.getLogger("routes.auth")
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
+# ── Auth event structured logger ─────────────────────────────────────────────────
+_auth_event_log = logging.getLogger("auth.events")
+
+
+def _log_auth_event(
+    *,
+    endpoint:    str,
+    provider:    str,
+    user_id:     str | None = None,
+    email:       str | None = None,
+    success:     bool = True,
+    duration_ms: float | None = None,
+    reason:      str | None = None,
+) -> None:
+    """
+    Emit a single structured log line for every authentication event.
+    Fields are kept consistent across providers so log aggregators can
+    build dashboards without per-route configuration.
+    """
+    _auth_event_log.info(
+        "auth_event  endpoint=%s  provider=%s  user_id=%s  success=%s  duration_ms=%s  reason=%s",
+        endpoint, provider, user_id or "anonymous", success,
+        f"{duration_ms:.1f}" if duration_ms is not None else "n/a",
+        reason or "-",
+        extra={
+            "auth.endpoint":    endpoint,
+            "auth.provider":    provider,
+            "auth.user_id":     user_id,
+            "auth.email":       email,
+            "auth.success":     success,
+            "auth.duration_ms": duration_ms,
+            "auth.reason":      reason,
+        },
+    )
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 _COOKIE_MAX_AGE = 7 * 24 * 60 * 60  # 7 days in seconds
@@ -246,20 +282,32 @@ async def google_callback(
         user_info = await google_exchange_code(code)
     except HTTPException as exc:
         logger.warning("Google exchange failed: %s", exc.detail)
+        _log_auth_event(endpoint="/google/callback", provider="google", success=False, reason="exchange_failed")
         return RedirectResponse(
             url=f"{FRONTEND_URL}/login?error=google_exchange_failed",
             status_code=status.HTTP_302_FOUND,
         )
 
     try:
+        t0 = time.time()
         access_token, refresh_token, user_id = await upsert_oauth_user(user_info)
+        duration_ms = (time.time() - t0) * 1000
     except Exception as exc:
         logger.error("Google upsert failed: %s", exc)
+        _log_auth_event(endpoint="/google/callback", provider="google", success=False, reason="upsert_failed")
         return RedirectResponse(
             url=f"{FRONTEND_URL}/login?error=internal",
             status_code=status.HTTP_302_FOUND,
         )
 
+    _log_auth_event(
+        endpoint="/google/callback",
+        provider="google",
+        user_id=user_id,
+        email=user_info.get("email"),
+        success=True,
+        duration_ms=duration_ms,
+    )
     redirect_url = f"{FRONTEND_URL}/oauth-callback?token={access_token}&provider=google"
     redirect = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
     _apply_refresh_cookie(redirect, refresh_token)
@@ -304,20 +352,32 @@ async def github_callback(
         user_info = await github_exchange_code(code)
     except HTTPException as exc:
         logger.warning("GitHub exchange failed: %s", exc.detail)
+        _log_auth_event(endpoint="/github/callback", provider="github", success=False, reason="exchange_failed")
         return RedirectResponse(
             url=f"{FRONTEND_URL}/login?error=github_exchange_failed",
             status_code=status.HTTP_302_FOUND,
         )
 
     try:
+        t0 = time.time()
         access_token, refresh_token, user_id = await upsert_oauth_user(user_info)
+        duration_ms = (time.time() - t0) * 1000
     except Exception as exc:
         logger.error("GitHub upsert failed: %s", exc)
+        _log_auth_event(endpoint="/github/callback", provider="github", success=False, reason="upsert_failed")
         return RedirectResponse(
             url=f"{FRONTEND_URL}/login?error=internal",
             status_code=status.HTTP_302_FOUND,
         )
 
+    _log_auth_event(
+        endpoint="/github/callback",
+        provider="github",
+        user_id=user_id,
+        email=user_info.get("email"),
+        success=True,
+        duration_ms=duration_ms,
+    )
     redirect_url = f"{FRONTEND_URL}/oauth-callback?token={access_token}&provider=github"
     redirect = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
     _apply_refresh_cookie(redirect, refresh_token)
@@ -450,7 +510,17 @@ async def signup_verify_otp(
     user_id = str(result.inserted_id)
     logger.info("New user created via OTP: %s (%s)", user_id, email)
 
+    t0 = time.time()
     token_data = await _issue_tokens_and_store(response, email, user_id)
+    duration_ms = (time.time() - t0) * 1000
+    _log_auth_event(
+        endpoint="/signup/verify-otp",
+        provider="local",
+        user_id=user_id,
+        email=email,
+        success=True,
+        duration_ms=duration_ms,
+    )
 
     return {
         **token_data,
@@ -510,7 +580,17 @@ async def signin(
         )
 
     user_id    = str(user["_id"])
+    t0 = time.time()
     token_data = await _issue_tokens_and_store(response, email, user_id)
+    duration_ms = (time.time() - t0) * 1000
+    _log_auth_event(
+        endpoint="/signin",
+        provider=user.get("auth_provider", "local"),
+        user_id=user_id,
+        email=email,
+        success=True,
+        duration_ms=duration_ms,
+    )
 
     return {
         **token_data,
@@ -617,7 +697,17 @@ async def reset_password(
 
     # Auto sign-in after reset
     user_id    = str(user["_id"])
+    t0 = time.time()
     token_data = await _issue_tokens_and_store(response, email, user_id)
+    duration_ms = (time.time() - t0) * 1000
+    _log_auth_event(
+        endpoint="/password/reset",
+        provider="local",
+        user_id=user_id,
+        email=email,
+        success=True,
+        duration_ms=duration_ms,
+    )
 
     return {
         **token_data,

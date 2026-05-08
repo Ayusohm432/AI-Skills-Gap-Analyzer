@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, Request, UploadFile, Form, Depends
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, File, Request, UploadFile, Form, Depends, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -16,6 +17,7 @@ import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
+
 from ml_loader import load_all_models, health_summary
 from ml_inference import (
     predict_role,
@@ -23,11 +25,14 @@ from ml_inference import (
     compute_readiness_score,
 )
 
+# ── Logging configuration ─────────────────────────────────────────────────
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -229,8 +234,146 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    
-from urllib.parse import urlparse
+
+# ── Sentry integration (optional, scaffolded via SENTRY_DSN env var) ────────
+_SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            environment=os.getenv("ENVIRONMENT", "development"),
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        )
+        app.add_middleware(SentryAsgiMiddleware)
+        logger.info("Sentry SDK initialised (environment=%s)", os.getenv("ENVIRONMENT", "development"))
+    except ImportError:
+        logger.warning(
+            "SENTRY_DSN is set but 'sentry-sdk' is not installed. "
+            "Run: pip install sentry-sdk[fastapi]"
+        )
+else:
+    logger.debug("Sentry is disabled (SENTRY_DSN not set).")
+
+
+# ── Standardised error response shape ───────────────────────────────────────
+# All error responses follow:  { "error": str, "code": str, "detail": any }
+
+def _http_status_to_code(status_code: int) -> str:
+    """Map HTTP status codes to readable string error codes."""
+    _MAP = {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        405: "METHOD_NOT_ALLOWED",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+        500: "INTERNAL_SERVER_ERROR",
+        502: "BAD_GATEWAY",
+        503: "SERVICE_UNAVAILABLE",
+    }
+    return _MAP.get(status_code, f"HTTP_{status_code}")
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """
+    Normalise all HTTPExceptions to::
+
+        { "error": <human message>, "code": <SCREAMING_SNAKE>, "detail": <extra> }
+    """
+    detail = exc.detail
+    # If detail is a dict that already follows our shape, forward it cleanly
+    if isinstance(detail, dict):
+        error_msg = detail.get("error", str(exc.status_code))
+        extra     = {k: v for k, v in detail.items() if k != "error"}
+    else:
+        error_msg = str(detail)
+        extra     = None
+
+    body = {
+        "error":  error_msg,
+        "code":   _http_status_to_code(exc.status_code),
+        "detail": extra,
+    }
+    logger.warning(
+        "HTTP %d %s  %s %s",
+        exc.status_code, body["code"],
+        request.method, request.url.path,
+    )
+    return JSONResponse(status_code=exc.status_code, content=body, headers=dict(exc.headers or {}))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """
+    Convert Pydantic / query-param validation errors to the same standard shape.
+    """
+    body = {
+        "error":  "Request validation failed.",
+        "code":   "VALIDATION_ERROR",
+        "detail": exc.errors(),
+    }
+    logger.warning(
+        "Validation error on %s %s: %s",
+        request.method, request.url.path, exc.errors(),
+    )
+    return JSONResponse(status_code=422, content=body)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all: log full traceback and return a sanitised 500."""
+    logger.exception(
+        "Unhandled exception on %s %s",
+        request.method, request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error":  "An unexpected server error occurred.",
+            "code":   "INTERNAL_SERVER_ERROR",
+            "detail": None,
+        },
+    )
+
+
+# ── Structured request / response logging middleware ──────────────────────
+_access_log = logging.getLogger("api.access")
+
+@app.middleware("http")
+async def structured_logging_middleware(request: Request, call_next):
+    """
+    Emit one structured log line per request with method, path, status,
+    and duration_ms. The same dict shape is used so log aggregators
+    (Datadog, Loki, CloudWatch) can index fields directly.
+    """
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    _access_log.info(
+        "%s %s → %d  (%.1f ms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        extra={
+            "method":      request.method,
+            "path":        request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+            "client_ip":   request.client.host if request.client else None,
+        },
+    )
+    # Propagate duration so route handlers can read it if needed
+    response.headers["X-Response-Time-Ms"] = str(duration_ms)
+    return response
+
+
 
 # Determine allowed origins dynamically
 base_origins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
