@@ -513,3 +513,18 @@ class InterviewSessionResponse(BaseModel):
             }
         }
     )
+
+# ── Readiness Levels Models ───────────────────────────────────────────────────
+
+class ReadinessLevel(BaseModel):
+    score: float = Field(ge=0.0, le=100.0)
+    matched_skills: List[str]
+    missing_skills: List[str]
+    required_skills: List[str]
+
+class ReadinessLevelResponse(BaseModel):
+    role: str
+    beginner: Optional[ReadinessLevel] = None
+    intermediate: Optional[ReadinessLevel] = None
+    advanced: Optional[ReadinessLevel] = None
+    no_analysis: bool = False

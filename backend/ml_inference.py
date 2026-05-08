@@ -44,6 +44,33 @@ _LSTM_SLA_MS: float = 100.0
 _lstm_encoder        = None   # SentenceTransformer instance once loaded
 _lstm_encoder_tried  = False  # prevents repeated disk reads after a failure
 
+# ── Role Readiness Constants ──────────────────────────────────────────────────
+
+_DEFAULT_ROLES_DB = {
+    "Data Scientist":            ["Python", "SQL", "Machine Learning", "Statistics", "Pandas", "TensorFlow"],
+    "Machine Learning Engineer": ["Python", "Docker", "Machine Learning", "TensorFlow", "MLOps", "AWS"],
+    "Backend Developer":         ["Node.js", "Python", "SQL", "Docker", "AWS", "API Design", "MongoDB", "FastAPI"],
+    "Frontend Developer":        ["React", "JavaScript", "HTML", "CSS", "TypeScript", "TailwindCSS", "Next.js"],
+    "Cyber Security Analyst":    ["Linux", "Networking", "Python", "SIEM", "Firewalls", "Cryptography"],
+}
+
+_ADVANCED_KEYWORDS = [
+    "System Design", "Architecture", "Microservices", "Leadership",
+    "Mentoring", "Distributed Systems", "Scalability", "Cloud Architecture",
+    "Security Auditing", "Compliance", "Performance Optimization"
+]
+
+# ── Readiness level thresholds (configurable via env, read once at import) ─────
+_BEGINNER_THRESHOLD:     int = int(os.getenv("BEGINNER_SKILLS_THRESHOLD", "5"))
+_INTERMEDIATE_THRESHOLD: int = int(os.getenv("INTERMEDIATE_SKILLS_THRESHOLD", "10"))
+
+# Normalised role-name lookup (lowercase → canonical key in _DEFAULT_ROLES_DB)
+_ROLE_ALIAS_MAP: dict[str, str] = {
+    k.lower(): k for k in _DEFAULT_ROLES_DB
+}
+
+
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -509,3 +536,102 @@ def rank_missing_skills(
             "priority":   priority,
         })
     return ranked
+
+
+def compute_level_scores(
+    role: str,
+    identified_skills: list[str],
+    missing_skills_ranked: list[dict],
+    has_projects: bool = False,
+    has_github: bool = False,
+) -> dict:
+    """
+    Calculate readiness scores for Beginner, Intermediate, and Advanced levels.
+
+    Scoring Heuristic:
+    - Beginner:     Top ``_BEGINNER_THRESHOLD`` core skills. +10 bonus if has_projects.
+    - Intermediate: Top ``_INTERMEDIATE_THRESHOLD`` core + secondary skills. +10 if has_github.
+    - Advanced:     Full skill set incl. architecture & leadership keywords. No bonus.
+
+    role is normalised to a canonical key (case-insensitive) before lookup.
+    """
+    # ── Normalise role name ──────────────────────────────────────────────────
+    canonical_role = _ROLE_ALIAS_MAP.get(role.strip().lower(), role)
+
+    identified_set = {s.lower() for s in identified_skills}
+    missing_ranked_skills = [s["skill"] for s in missing_skills_ranked]
+
+    # ── 1. Beginner ───────────────────────────────────────────────────
+    core_skills = _DEFAULT_ROLES_DB.get(canonical_role, [])[:_BEGINNER_THRESHOLD]
+    if not core_skills:
+        # Unknown role: fall back to top ranked missing skills as a proxy
+        core_skills = missing_ranked_skills[:_BEGINNER_THRESHOLD]
+
+    matched_beg = [s for s in core_skills if s.lower() in identified_set]
+    score_beg = (len(matched_beg) / len(core_skills) * 100) if core_skills else 0.0
+    if has_projects:
+        score_beg = min(100.0, score_beg + 10.0)
+    else:
+        score_beg = min(100.0, score_beg)
+
+    # ── 2. Intermediate ────────────────────────────────────────────────
+    # Start with all known role skills (not just top-N), then pad with ranked
+    # missing skills — use a seen-set to avoid duplicates in the required list.
+    known_role_skills = _DEFAULT_ROLES_DB.get(canonical_role, [])[:_INTERMEDIATE_THRESHOLD]
+    seen: set[str] = {s.lower() for s in known_role_skills}
+    inter_skills = list(known_role_skills)  # copy
+    for s in missing_ranked_skills:
+        if len(inter_skills) >= _INTERMEDIATE_THRESHOLD:
+            break
+        if s.lower() not in seen:
+            inter_skills.append(s)
+            seen.add(s.lower())
+
+    matched_inter = [s for s in inter_skills if s.lower() in identified_set]
+    score_inter = (len(matched_inter) / len(inter_skills) * 100) if inter_skills else 0.0
+    if has_github:
+        score_inter = min(100.0, score_inter + 10.0)
+    else:
+        score_inter = min(100.0, score_inter)
+
+    # ── 3. Advanced ───────────────────────────────────────────────────
+    # Deterministic ordering: role DB first, then ranked missing, then leadership keywords.
+    adv_seen: set[str] = set()
+    adv_skills: list[str] = []
+    for s in (
+        _DEFAULT_ROLES_DB.get(canonical_role, [])
+        + missing_ranked_skills
+        + _ADVANCED_KEYWORDS
+    ):
+        key = s.lower()
+        if key not in adv_seen:
+            adv_skills.append(s)
+            adv_seen.add(key)
+
+    matched_adv = [s for s in adv_skills if s.lower() in identified_set]
+    score_adv = round(
+        (len(matched_adv) / len(adv_skills) * 100) if adv_skills else 0.0, 2
+    )
+
+    return {
+        "beginner": {
+            "score":           round(score_beg, 2),
+            "matched_skills":  matched_beg,
+            "missing_skills":  [s for s in core_skills if s.lower() not in identified_set],
+            "required_skills": core_skills,
+        },
+        "intermediate": {
+            "score":           round(score_inter, 2),
+            "matched_skills":  matched_inter,
+            "missing_skills":  [s for s in inter_skills if s.lower() not in identified_set],
+            "required_skills": inter_skills,
+        },
+        "advanced": {
+            "score":           score_adv,
+            "matched_skills":  matched_adv,
+            "missing_skills":  [s for s in adv_skills if s.lower() not in identified_set],
+            "required_skills": adv_skills,
+        },
+    }
+
+

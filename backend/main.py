@@ -67,6 +67,8 @@ from routes import alerts as alerts_router
 from routes import benchmark as benchmark_router
 from routes import feedback as feedback_router
 from routes import monitoring as monitoring_router
+from routes import readiness as readiness_router
+
 from services.market_service import seed_market_data, refresh_all_roles
 from services.alerts_service import check_and_generate_alerts
 from services.monitoring_service import weekly_monitoring_job
@@ -246,6 +248,8 @@ app.include_router(progress_router.router,  prefix="/api/v1", tags=["Progress & 
 app.include_router(alerts_router.router,    prefix="/api/v1", tags=["Market Alerts"])
 app.include_router(feedback_router.router,  prefix="/api/v1", tags=["Resume Analysis"])
 app.include_router(monitoring_router.router,prefix="/api/v1", tags=["Model Versioning"])
+app.include_router(readiness_router.router, prefix="/api/v1", tags=["Readiness Analysis"])
+
 
 
 @app.get("/", include_in_schema=False)
