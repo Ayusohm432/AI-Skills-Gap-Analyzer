@@ -38,7 +38,9 @@ from ml_inference import (
     predict_missing_skills,
     compute_readiness_score,
     rank_missing_skills,
+    _DEFAULT_ROLES_DB,
 )
+
 from nlp.engine import (
     extract_text,
     extract_text_from_pdf,
@@ -96,13 +98,6 @@ async def _set_status(
     )
 
 
-_DEFAULT_ROLES_DB = {
-    "Data Scientist":            ["Python", "SQL", "Machine Learning", "Statistics", "Pandas", "TensorFlow"],
-    "Machine Learning Engineer": ["Python", "Docker", "Machine Learning", "TensorFlow", "MLOps", "AWS"],
-    "Backend Developer":         ["Node.js", "Python", "SQL", "Docker", "AWS", "API Design", "MongoDB", "FastAPI"],
-    "Frontend Developer":        ["React", "JavaScript", "HTML", "CSS", "TypeScript", "TailwindCSS", "Next.js"],
-    "Cyber Security Analyst":    ["Linux", "Networking", "Python", "SIEM", "Firewalls", "Cryptography"],
-}
 
 
 def _static_skill_gap(role: str, found_skills: list[str]) -> list[str]:
