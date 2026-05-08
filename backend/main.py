@@ -38,8 +38,15 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-# Load environment variables
-load_dotenv()
+# Load environment variables hierarchically
+# 1. System environment variables (already set)
+# 2. .env.local (secrets/overrides)
+# 3. .env.{ENVIRONMENT} (environment-specific defaults)
+# 4. .env (base defaults)
+_env = os.getenv("ENVIRONMENT", "development")
+load_dotenv(".env.local")
+load_dotenv(f".env.{_env}")
+load_dotenv(".env")
 
 from database import (
     analyses_collection, 
