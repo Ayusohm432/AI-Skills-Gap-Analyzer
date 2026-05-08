@@ -43,13 +43,21 @@ class UserCreate(UserBase):
     password: str
 
 class UserInDB(UserBase):
-    hashed_password: str
+    hashed_password: Optional[str] = None  # None for pure OAuth users
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     analysis_history: List[PyObjectId] = []
     target_role: Optional[str] = None
     skills: List[str] = []
+    # ── Auth provider fields ───────────────────────────────────────────
     github_username: Optional[str] = None
+    auth_provider: Optional[str] = Field(
+        default="local",
+        description="local | google | github | supabase",
+    )
+    oauth_provider_id: Optional[str] = None
+    email_verified: bool = False
+    picture: Optional[str] = None
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -63,7 +71,10 @@ class UserInDB(UserBase):
                 "analysis_history": [],
                 "target_role": "Backend Developer",
                 "skills": ["Python", "FastAPI"],
-                "github_username": "octocat"
+                "github_username": "octocat",
+                "auth_provider": "local",
+                "email_verified": True,
+                "picture": None,
             }
         }
     )
@@ -75,7 +86,18 @@ class UserResponse(UserBase):
     analysis_history: List[PyObjectId] = []
     target_role: Optional[str] = None
     skills: List[str] = []
+    # ── Auth / provider fields ─────────────────────────────────────────
     github_username: Optional[str] = None
+    auth_provider: Optional[str] = Field(
+        default="local",
+        description="local | google | github | supabase",
+    )
+    oauth_provider_id: Optional[str] = None
+    email_verified: bool = False
+    picture: Optional[str] = Field(
+        default=None,
+        description="Profile photo URL (populated from OAuth provider)",
+    )
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -91,7 +113,11 @@ class UserResponse(UserBase):
                 "analysis_history": [],
                 "target_role": "Backend Developer",
                 "skills": ["Python", "FastAPI"],
-                "github_username": "octocat"
+                "github_username": "octocat",
+                "auth_provider": "github",
+                "oauth_provider_id": "12345678",
+                "email_verified": True,
+                "picture": "https://avatars.githubusercontent.com/u/12345678",
             }
         }
     )
