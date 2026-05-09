@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   User, Mail, Briefcase, Award, Save, 
-  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight, Github 
+  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight 
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getProfileApi, updateProfileApi, getHistoryApi, disconnectGithubApi } from '../api/user';
+import { getProfileApi, updateProfileApi, getHistoryApi } from '../api/user';
 import { getProgressApi, getBadgesApi, recordActionApi } from '../api/progress';
 import InteractiveBackground from '../components/InteractiveBackground';
 import Navbar from '../components/Navbar';
@@ -133,16 +133,20 @@ export default function ProfilePage() {
   };
 
   const handleGithubDisconnect = async () => {
+    const updatedProfile = {
+      ...profile,
+      github_username: null
+    };
+    setProfile(updatedProfile);
+    
     try {
       setIsSaving(true);
-      await disconnectGithubApi();
-      
-      const updatedProfile = {
-        ...profile,
+      await updateProfileApi({
+        name: updatedProfile.name,
+        target_role: updatedProfile.target_role,
+        skills: updatedProfile.skills,
         github_username: null
-      };
-      setProfile(updatedProfile);
-      
+      });
       setMessage({ type: 'success', text: 'GitHub profile disconnected.' });
     } catch (err) {
       setMessage({ type: 'error', text: 'Failed to disconnect GitHub.' });
@@ -234,15 +238,8 @@ export default function ProfilePage() {
                   </div>
                   <h2 className="text-lg font-bold text-[var(--text-primary)]">{profile.name || 'Anonymous'}</h2>
                   <p className="text-xs text-[var(--text-muted)] mb-4">{profile.email}</p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <div className="inline-flex items-center gap++-2 px-3 py-1 rounded-full bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-[10px] font-bold uppercase tracking-wider">
-                      Verified User
-                    </div>
-                    {profile.github_username && (
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] text-[10px] font-bold uppercase tracking-wider">
-                        <CheckCircle2 size={12} /> GitHub Connected
-                      </div>
-                    )}
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-[10px] font-bold uppercase tracking-wider">
+                    Verified User
                   </div>
                 </motion.div>
 
@@ -276,16 +273,6 @@ export default function ProfilePage() {
                 <motion.div {...fadeUp(0.12)}>
                   <XPBar progress={progress} />
                 </motion.div>
-
-                {profile.github_username && (
-                  <motion.div {...fadeUp(0.13)} className="px-4 py-3 rounded-xl bg-[var(--accent-teal-dim)] border border-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-sm flex items-start gap-3">
-                    <Github size={18} className="mt-0.5 shrink-0" />
-                    <div>
-                      <strong>Your GitHub account (@{profile.github_username}) is linked</strong> — your public repositories are being used to enrich your skill analysis.
-                    </div>
-                  </motion.div>
-                )}
-
                 <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay">
                   {message.text && (
                     <motion.div

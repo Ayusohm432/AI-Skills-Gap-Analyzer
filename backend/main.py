@@ -16,7 +16,6 @@ import threading
 import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from urllib.parse import urlparse
 
 
 from ml_loader import load_all_models, health_summary

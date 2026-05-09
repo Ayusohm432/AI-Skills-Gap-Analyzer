@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { jwtDecode } from 'jwt-decode';
-import { loginApi, sendSignupOtpApi, verifySignupOtpApi, logoutApi, refreshTokenApi } from '../api/auth';
-import { getAccessToken, clearAccessToken, setAccessToken } from '../api/base';
+import { loginApi, registerApi, logoutApi, refreshTokenApi } from '../api/auth';
+import { getAccessToken, clearAccessToken } from '../api/base';
 import { getProfileApi } from '../api/user';
 
 const AuthContext = createContext(null);
@@ -12,7 +12,6 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   
   const refreshTimeoutRef = useRef(null);
-  const refreshingRef = useRef(false);
 
   const clearRefreshTimeout = () => {
     if (refreshTimeoutRef.current) {
@@ -43,12 +42,6 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const handleSilentRefresh = useCallback(async () => {
-    if (refreshingRef.current) {
-      console.log("[Auth] Refresh already in progress, skipping.");
-      return false;
-    }
-    refreshingRef.current = true;
-    
     console.log("[Auth] Attempting silent background refresh...");
     try {
       const newToken = await refreshTokenApi();
@@ -73,8 +66,6 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       clearAccessToken();
       return false;
-    } finally {
-      refreshingRef.current = false;
     }
   }, [scheduleTokenRefresh]);
 
@@ -105,30 +96,11 @@ export const AuthProvider = ({ children }) => {
     scheduleTokenRefresh(data.access_token);
   };
 
-  const sendSignupOtp = async (email) => {
-    return await sendSignupOtpApi(email);
-  };
-
-  const verifySignupOtp = async (email, otp, name, password) => {
-    const data = await verifySignupOtpApi(email, otp, name, password);
+  const register = async (name, email, password) => {
+    const data = await registerApi(name, email, password);
     setUser(data.user);
     setIsAuthenticated(true);
     scheduleTokenRefresh(data.access_token);
-    return data;
-  };
-
-  const oauthLogin = async (token) => {
-    setAccessToken(token);
-    try {
-      const profile = await getProfileApi();
-      setUser(profile);
-      setIsAuthenticated(true);
-      scheduleTokenRefresh(token);
-    } catch (err) {
-      console.error("Failed to fetch profile during OAuth login", err);
-      clearAccessToken();
-      throw err;
-    }
   };
 
   const logout = async () => {
@@ -143,11 +115,8 @@ export const AuthProvider = ({ children }) => {
     updateUserState: setUser,
     isAuthenticated,
     isLoading,
-    githubLinked: !!user?.github_username,
     login,
-    sendSignupOtp,
-    verifySignupOtp,
-    oauthLogin,
+    register,
     logout
   };
 

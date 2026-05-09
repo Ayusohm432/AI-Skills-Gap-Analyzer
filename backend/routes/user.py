@@ -147,10 +147,6 @@ async def delete_github_token(current_user: dict = Depends(get_current_user)):
     """
     await users_collection.update_one(
         {"_id": ObjectId(current_user["id"])},
-        {"$unset": {
-            "github_access_token": "", 
-            "github_refresh_token": "",
-            "github_username": ""
-        }}
+        {"$unset": {"github_access_token": "", "github_refresh_token": ""}}
     )
     return {"message": "GitHub access revoked and token deleted."}
