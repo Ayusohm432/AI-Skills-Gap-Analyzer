@@ -1,13 +1,22 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "motion/react";
+import { Upload, FileCheck, ChevronDown, Loader2, AlertCircle, Briefcase, CheckCircle2 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
+import Navbar from "../components/Navbar";
+import Footer from "../components/Footer";
+import PageTransition from "../components/PageTransition";
+import { secureFetch } from "../api/base";
 
 export default function UploadPage() {
   const [file, setFile] = useState(null);
   const [role, setRole] = useState("Auto Detect");
   const [customRole, setCustomRole] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState("");
   const [error, setError] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [roleOptions, setRoleOptions] = useState([
     "Auto Detect",
     "Machine Learning Engineer",
@@ -16,14 +25,45 @@ export default function UploadPage() {
     "Frontend Developer",
     "Cyber Security Analyst"
   ]);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
   const navigate = useNavigate();
+  const pollRef = useRef(null); // setInterval ID for cleanup
+
+  // Pipeline steps mapped to backend status flow
+  const PIPELINE_STEPS = [
+    { key: 'upload',   label: 'Uploading' },
+    { key: 'extract',  label: 'Extracting' },
+    { key: 'analyze',  label: 'Analyzing' },
+    { key: 'complete', label: 'Complete' },
+  ];
+  const [pipelineStep, setPipelineStep] = useState(-1); // -1 = not started
+
+  // Cleanup polling on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, []);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        // Automatically use localhost in dev mode, but use the environment variable in production (Vercel)
-        const apiUrl = import.meta.env.DEV ? "http://127.0.0.1:8000" : (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000");
-        const res = await fetch(`${apiUrl}/api/v1/jobs/roles`);
+        const res = await secureFetch('/api/v1/jobs/roles');
         if (res.ok) {
           const data = await res.json();
           if (data.roles && data.roles.length > 0) {
@@ -37,203 +77,499 @@ export default function UploadPage() {
     fetchRoles();
   }, []);
 
+  const validateAndSetFile = (selectedFile) => {
+    if (!selectedFile) return;
+    
+    // 1. Size Validation (5MB max)
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      setError("File exceeds the 5MB size limit. Please choose a smaller file.");
+      setFile(null);
+      return;
+    }
+
+    // 2. Type Validation
+    const ext = selectedFile.name.split('.').pop().toLowerCase();
+    if (!['pdf', 'doc', 'docx', 'txt'].includes(ext)) {
+      setError("Invalid file format. Please upload a PDF, DOCX, or TXT file.");
+      setFile(null);
+      return;
+    }
+
+    setError(null);
+    setFile(selectedFile);
+  };
+
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      setError(null);
+      validateAndSetFile(e.target.files[0]);
     }
   };
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      validateAndSetFile(droppedFile);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) {
-      setError("Please select a file to upload.");
+      setError("Please select a resume file to continue.");
       return;
     }
 
     setLoading(true);
+    setUploadProgress(0);
+    setUploadStatus("Preparing document...");
+    setPipelineStep(0); // Uploading
     setError(null);
 
     const formData = new FormData();
     formData.append("resume", file);
 
-    // If Custom Role is selected but empty, fallback to Auto Detect
     let finalRole = role;
     if (role === "Custom") {
       finalRole = customRole.trim() !== "" ? customRole.trim() : "Auto Detect";
     }
     formData.append("role", finalRole);
+    localStorage.setItem("userSelectedRole", finalRole);
 
     try {
-      // Automatically use localhost in dev mode, but use the environment variable in production
-      const apiUrl = import.meta.env.DEV ? "http://127.0.0.1:8000" : (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000");
-      console.log(`[DEBUG] Initiating request to: ${apiUrl}/api/v1/analyze/resume`);
-      
-      const response = await fetch(`${apiUrl}/api/v1/analyze/resume`, {
+      // ── Step 1: Submit job (expect 202 + job_id) ──────────────────
+      setUploadProgress(15);
+      setUploadStatus("Uploading resume...");
+
+      const submitRes = await secureFetch('/api/v1/analyze/resume', {
         method: "POST",
         body: formData,
       });
 
-      console.log(`[DEBUG] Response Status: ${response.status} ${response.statusText}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[DEBUG] Error Response Body: ${errorText}`);
-        throw new Error(`Server responded with status: ${response.status}. Details: ${errorText}`);
+      if (!submitRes.ok) {
+        const errData = await submitRes.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error: ${submitRes.status}`);
       }
 
-      const responseText = await response.text();
-      console.log(`[DEBUG] Raw Response Body: ${responseText.substring(0, 100)}...`);
+      const { job_id } = await submitRes.json();
 
-      if (!responseText || responseText.trim() === "") {
-        throw new Error("Received an empty response from the server.");
-      }
+      setPipelineStep(1); // Extracting
+      setUploadProgress(30);
+      setUploadStatus("Extracting text from resume...");
 
-      const data = JSON.parse(responseText);
-      console.log("[DEBUG] Successfully parsed JSON data.");
+      // ── Step 2: Poll every 2s until completed / failed ────────────
+      const result = await new Promise((resolve, reject) => {
+        let pollProgress = 35;
 
-      // Store data in localStorage specifically for the demo dashboard to pick up
-      localStorage.setItem("analysisResult", JSON.stringify(data));
+        pollRef.current = setInterval(async () => {
+          try {
+            const pollRes = await secureFetch(`/api/v1/jobs/${job_id}`);
+            if (!pollRes.ok) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              reject(new Error(`Poll error: ${pollRes.status}`));
+              return;
+            }
 
-      navigate("/dashboard");
+            const jobData = await pollRes.json();
+
+            // Map real backend step → 4-stage UI stepper
+            if (jobData.status === "processing") {
+              const backendStep = jobData.step || 1;
+              const stepLabel = jobData.step_name || "Processing...";
+              if (backendStep <= 2) {
+                setPipelineStep(1); // Extracting
+                setUploadStatus(stepLabel);
+              } else if (backendStep <= 8) {
+                setPipelineStep(2); // Analyzing
+                setUploadStatus(stepLabel);
+              } else {
+                setPipelineStep(2); // Still analyzing (step 9 = storage)
+                setUploadStatus("Saving results...");
+              }
+            }
+
+            if (pollProgress < 90) {
+              pollProgress += 8;
+              setUploadProgress(Math.min(pollProgress, 92));
+            }
+
+            if (jobData.status === "completed") {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setPipelineStep(3); // Complete
+              resolve(jobData.result);
+            } else if (jobData.status === "failed") {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              reject(new Error(jobData.error || "Analysis failed on the server."));
+            }
+            // "pending" / "processing" → keep polling
+          } catch (pollErr) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            reject(pollErr);
+          }
+        }, 2000);
+      });
+
+      // ── Step 3: Save result + cache resume for role-swap ──────────
+      setUploadProgress(100);
+      setUploadStatus("Analysis Complete!");
+      localStorage.setItem("analysisResult", JSON.stringify(result));
+
+      // Cache resume in sessionStorage so DashboardPage can re-submit
+      // for role swap without the user re-uploading (Issue #51)
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          sessionStorage.setItem("resumeFileBase64", reader.result);
+          sessionStorage.setItem("resumeFileName", file.name);
+          sessionStorage.setItem("resumeContentType", file.type);
+        };
+        reader.readAsDataURL(file);
+      } catch (_) { /* non-critical — swap just won't be available */ }
+
+      setTimeout(() => navigate("/dashboard"), 800);
 
     } catch (err) {
-      console.error("[DEBUG] Full error object:", err);
-      // Detailed error messaging for the user
-      const userFriendlyMsg = err.message.includes("Failed to fetch") 
-        ? "CORS Blocked or Network Error. Check if backend allows this origin." 
-        : err.message;
-      setError(userFriendlyMsg);
-    } finally {
+      console.error(err);
+      setError(err.message || "Analysis failed. Please make sure the backend is running and the file is readable.");
       setLoading(false);
+      setPipelineStep(-1);
     }
   };
 
+
   return (
-    <div className="min-h-screen flex flex-col font-sans text-zinc-300 relative">
-      <InteractiveBackground />
-      {/* Navigation */}
-      <nav className="border-b border-zinc-800/50 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-10 px-6 py-4 flex justify-between items-center">
-        <Link to="/" className="font-semibold tracking-wide text-zinc-100 flex items-center gap-2">
-          <div className="w-4 h-4 bg-zinc-700 rounded-sm"></div>
-          SkillGap<span className="text-zinc-500">Analyzer</span>
-        </Link>
-      </nav>
+    <PageTransition>
+      <div className="min-h-screen flex flex-col relative">
+        <InteractiveBackground />
+        <Navbar />
 
-      <main className="flex-1 flex items-center justify-center p-6 relative z-10 animate-in fade-in zoom-in duration-700">
-        <div className="w-full max-w-xl bg-zinc-900/60 backdrop-blur-xl border border-zinc-700/50 p-10 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.5)] relative overflow-hidden group">
+        <main className="flex-1 flex items-center justify-center p-6 pt-28 pb-12 relative z-10">
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full max-w-xl glass-card p-8 md:p-10 relative overflow-hidden noise-overlay"
+          >
+            {/* Warm ambient glow */}
+            <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-80 h-40 rounded-full blur-[80px] pointer-events-none z-0"
+              style={{ background: 'radial-gradient(circle, rgba(232,168,73,0.1) 0%, transparent 70%)' }}
+            />
 
-          {/* Subtle Ambient Glow */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-blue-500/10 blur-[60px] pointer-events-none rounded-full"></div>
-
-          <div className="mb-10 text-center relative z-10">
-            <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400 tracking-tight mb-2">Resume Engine Setup</h1>
-            <p className="text-sm text-zinc-400 font-light">Configure analysis parameters and inject your document.</p>
-          </div>
-
-          {error && (
-            <div className="mb-6 p-3 bg-red-950/30 border border-red-900/50 text-red-400 text-sm rounded-sm">
-              [!] {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-8 relative z-10">
-            <div className="group/input">
-              <label className="block text-xs font-mono text-zinc-400 mb-3 uppercase tracking-widest flex items-center gap-2">
-                <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                Target Role Vector (Optional)
-              </label>
-              <div className="relative">
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full appearance-none bg-zinc-950/80 border border-zinc-700/50 text-zinc-200 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 block p-4 outline-none rounded-xl transition-all shadow-inner hover:border-zinc-600 mb-3 cursor-pointer"
-                  disabled={loading}
-                >
-                  {roleOptions.map(r => (
-                    <option key={r} value={r}>{r === "Auto Detect" ? "Auto Detect Profile" : r}</option>
-                  ))}
-                  <option value="Custom">Other (Custom Role)</option>
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-zinc-400 top-0 h-[52px]">
-                  <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" /></svg>
+            <div className="relative z-10">
+              {/* Header */}
+              <div className="mb-8 text-center">
+                <div className="w-12 h-12 mx-auto rounded-xl bg-[var(--accent-warm-dim)] flex items-center justify-center mb-4">
+                  <Upload size={22} className="text-[var(--accent-warm)]" />
                 </div>
+                <h1 className="text-2xl md:text-3xl font-semibold text-[var(--text-primary)] tracking-tight mb-2">
+                  Analyze Your Resume
+                </h1>
+                <p className="text-sm text-[var(--text-muted)]">
+                  Upload your document and choose a target role to begin.
+                </p>
               </div>
 
-              {role === "Custom" && (
-                <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                  <input
-                    type="text"
-                    placeholder="e.g. Product Manager"
-                    value={customRole}
-                    onChange={(e) => setCustomRole(e.target.value)}
-                    className="w-full bg-zinc-950/80 border border-blue-500/50 text-zinc-200 text-sm focus:border-blue-400 focus:ring-1 focus:ring-blue-400 block p-4 outline-none rounded-xl transition-all shadow-[0_0_15px_rgba(59,130,246,0.1)] placeholder:text-zinc-600"
-                    disabled={loading}
-                  />
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono text-zinc-400 mb-3 uppercase tracking-widest flex items-center gap-2">
-                <svg className="w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                Input Vector: Document
-              </label>
-              <div className={`border-2 border-dashed ${file ? 'border-purple-500/50 bg-purple-500/5' : 'border-zinc-700 bg-zinc-950/50 hover:bg-zinc-800/80 hover:border-blue-500/50'} transition-all duration-300 cursor-pointer relative rounded-2xl p-10 text-center flex flex-col items-center justify-center min-h-[180px] group/drop`}>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  onChange={handleFileChange}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  disabled={loading}
-                />
-
-                {file ? (
-                  <div className="text-center animate-in zoom-in duration-300">
-                    <div className="w-16 h-16 bg-purple-500/20 text-purple-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-[0_0_15px_rgba(168,85,247,0.3)]">
-                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              {/* Error */}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mb-6 overflow-hidden"
+                  >
+                    <div className="flex items-start gap-3 p-4 rounded-xl bg-[var(--accent-coral-dim)] border border-[var(--accent-coral)]/20 text-[var(--accent-coral)]">
+                      <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                      <p className="text-sm">{error}</p>
                     </div>
-                    <p className="text-zinc-100 font-bold text-base truncate max-w-[250px] mx-auto">{file.name}</p>
-                    <p className="text-purple-400 text-xs mt-2 font-mono tracking-widest uppercase">Target Locked</p>
-                  </div>
-                ) : (
-                  <div className="text-center transform group-hover/drop:-translate-y-1 transition-transform duration-300">
-                    <div className="w-16 h-16 bg-zinc-800 text-zinc-400 group-hover/drop:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors">
-                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                    </div>
-                    <p className="text-zinc-300 font-medium text-base mb-1">Drag & Drop Resume</p>
-                    <p className="text-zinc-500 text-sm">Supported formats: PDF, DOCX</p>
-                  </div>
+                  </motion.div>
                 )}
-              </div>
-            </div>
+              </AnimatePresence>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className={`w-full py-4 text-sm font-bold tracking-widest uppercase transition-all duration-300 rounded-xl flex items-center justify-center gap-2 relative overflow-hidden group/btn ${loading
-                ? 'bg-zinc-800 text-zinc-500 cursor-wait border border-zinc-700'
-                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-[0_0_20px_rgba(79,70,229,0.4)] hover:shadow-[0_0_30px_rgba(79,70,229,0.6)]'
-                }`}
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-zinc-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Processing Intelligence...
-                </>
-              ) : (
-                <>
-                  <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-[150%] group-hover/btn:animate-[shimmer_1.5s_ease-in-out_infinite]"></div>
-                  Initiate Analysis Core
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      </main>
-    </div>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Role Selection */}
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-2.5" id="role-label">
+                    <Briefcase size={15} className="text-[var(--accent-warm)]" />
+                    Target Role
+                  </label>
+                  <div className="relative" ref={dropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => !loading && setIsDropdownOpen(!isDropdownOpen)}
+                      className={`w-full flex items-center justify-between bg-[var(--bg-deep)] border text-[var(--text-primary)] text-sm rounded-xl p-4 transition-all ${
+                        isDropdownOpen ? 'border-[var(--accent-warm)] shadow-[0_0_15px_rgba(232,168,73,0.1)]' : 'border-[var(--border-subtle)] hover:border-[var(--border-hover)] cursor-pointer'
+                      } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <span>{role === "Auto Detect" ? "Auto Detect (Best Match)" : role === "Custom" ? "Other (Type your own)" : role}</span>
+                      <ChevronDown size={16} className={`text-[var(--text-muted)] transition-transform duration-300 ${isDropdownOpen ? 'rotate-180 text-[var(--accent-warm)]' : ''}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {isDropdownOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="absolute z-50 w-full mt-2 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
+                        >
+                          <div className="max-h-60 overflow-y-auto scrollbar-custom py-2">
+                            {roleOptions.map(r => (
+                              <button
+                                key={r}
+                                type="button"
+                                onClick={() => {
+                                  setRole(r);
+                                  setIsDropdownOpen(false);
+                                  if (r !== "Custom") setCustomRole("");
+                                }}
+                                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                                  role === r 
+                                    ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] font-medium' 
+                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
+                                }`}
+                              >
+                                {r === "Auto Detect" ? "Auto Detect (Best Match)" : r}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRole("Custom");
+                                setIsDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-4 py-3 text-sm transition-colors border-t border-[var(--border-subtle)] mt-1 pt-3 ${
+                                role === "Custom" 
+                                  ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] font-medium' 
+                                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
+                              }`}
+                            >
+                              Other (Type your own)
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  <AnimatePresence>
+                    {role === "Custom" && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <input
+                          type="text"
+                          placeholder="e.g. Product Manager, DevOps Engineer..."
+                          value={customRole}
+                          onChange={(e) => setCustomRole(e.target.value)}
+                          disabled={loading}
+                          id="custom-role-input"
+                          className="w-full mt-3 bg-[var(--bg-deep)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-sm rounded-xl p-4 transition-all placeholder:text-[var(--text-muted)]"
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* File Upload Zone */}
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] mb-2.5" id="file-label">
+                    <FileCheck size={15} className="text-[var(--accent-teal)]" />
+                    Resume File
+                  </label>
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 cursor-pointer min-h-[180px] flex flex-col items-center justify-center ${
+                      isDragging
+                        ? 'border-[var(--accent-warm)] bg-[var(--accent-warm-dim)]'
+                        : file
+                          ? 'border-[var(--accent-teal)]/40 bg-[var(--accent-teal-dim)]'
+                          : 'border-[var(--border-subtle)] bg-[var(--bg-deep)]/50 hover:border-[var(--border-hover)] hover:bg-[var(--bg-elevated)]/30'
+                    }`}
+                    id="file-drop-zone"
+                  >
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={handleFileChange}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      disabled={loading}
+                      id="file-input"
+                    />
+
+                    <AnimatePresence mode="wait">
+                      {file ? (
+                        <motion.div
+                          key="uploaded"
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          className="text-center"
+                        >
+                          <div className="w-14 h-14 rounded-xl bg-[var(--accent-teal-dim)] flex items-center justify-center mx-auto mb-4">
+                            <FileCheck size={24} className="text-[var(--accent-teal)]" />
+                          </div>
+                          <p className="text-[var(--text-primary)] font-semibold text-sm truncate max-w-[250px] mx-auto">
+                            {file.name}
+                          </p>
+                          <p className="text-[var(--accent-teal)] text-xs mt-2 font-medium">
+                            Ready to analyze • Click to change
+                          </p>
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="empty"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="text-center"
+                        >
+                          <div className="w-14 h-14 rounded-xl bg-[var(--bg-elevated)] flex items-center justify-center mx-auto mb-4 transition-colors">
+                            <Upload size={24} className="text-[var(--text-muted)]" />
+                          </div>
+                          <p className="text-[var(--text-secondary)] text-sm font-medium mb-1">
+                            Drop your resume here
+                          </p>
+                          <p className="text-[var(--text-muted)] text-xs">
+                            PDF, DOCX, or TXT — up to 5MB
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                {/* Submit Button & Progress */}
+                <div className="space-y-4">
+                  <motion.button
+                    type="submit"
+                    disabled={loading || !file}
+                    whileHover={!(loading || !file) ? { scale: 1.01 } : {}}
+                    whileTap={!(loading || !file) ? { scale: 0.98 } : {}}
+                    id="submit-analysis"
+                    className={`w-full py-4 text-sm font-semibold tracking-wide rounded-xl flex items-center justify-center gap-2.5 transition-all duration-300 ${
+                      loading || !file
+                        ? 'bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
+                        : 'btn-warm w-full'
+                    } ${loading ? 'cursor-wait' : !file ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Begin Analysis'
+                    )}
+                  </motion.button>
+
+                  <AnimatePresence>
+                    {loading && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pt-4 pb-1">
+                          {/* Step-by-step pipeline tracker */}
+                          <div className="flex items-center justify-between mb-5">
+                            {PIPELINE_STEPS.map((step, idx) => {
+                              const isCompleted = pipelineStep > idx;
+                              const isActive = pipelineStep === idx;
+                              return (
+                                <React.Fragment key={step.key}>
+                                  <div className="flex flex-col items-center gap-1.5 flex-1">
+                                    {/* Step icon */}
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                                      isCompleted
+                                        ? 'bg-[var(--accent-teal)] text-[var(--bg-deep)]'
+                                        : isActive
+                                          ? 'bg-[var(--accent-warm-dim)] border-2 border-[var(--accent-warm)] text-[var(--accent-warm)]'
+                                          : 'bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)]'
+                                    }`}>
+                                      {isCompleted ? (
+                                        <CheckCircle2 size={16} />
+                                      ) : isActive ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                      ) : (
+                                        <span className="text-[10px] font-bold">{idx + 1}</span>
+                                      )}
+                                    </div>
+                                    {/* Step label */}
+                                    <span className={`text-[10px] font-medium transition-colors duration-200 ${
+                                      isCompleted
+                                        ? 'text-[var(--accent-teal)]'
+                                        : isActive
+                                          ? 'text-[var(--accent-warm)]'
+                                          : 'text-[var(--text-muted)]'
+                                    }`}>
+                                      {step.label}
+                                    </span>
+                                  </div>
+                                  {/* Connector line */}
+                                  {idx < PIPELINE_STEPS.length - 1 && (
+                                    <div className="flex-1 max-w-[40px] h-px mx-1 mt-[-18px]">
+                                      <div className={`h-full rounded-full transition-all duration-500 ${
+                                        pipelineStep > idx
+                                          ? 'bg-[var(--accent-teal)]'
+                                          : 'bg-[var(--border-subtle)]'
+                                      }`} />
+                                    </div>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                          </div>
+
+                          {/* Status text + percentage */}
+                          <div className="flex justify-between text-xs font-medium text-[var(--text-secondary)] mb-2">
+                            <span>{uploadStatus}</span>
+                            <span>{Math.round(uploadProgress)}%</span>
+                          </div>
+                          {/* Progress bar */}
+                          <div className="h-1.5 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
+                            <motion.div 
+                              className={`h-full rounded-full transition-colors duration-300 ${
+                                pipelineStep >= 3 ? 'bg-[var(--accent-teal)]' : 'bg-[var(--accent-warm)]'
+                              }`}
+                              initial={{ width: '0%' }}
+                              animate={{ width: `${uploadProgress}%` }}
+                              transition={{ duration: 0.4, ease: 'easeOut' }}
+                            />
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </form>
+            </div>
+          </motion.div>
+        </main>
+
+        <Footer />
+      </div>
+    </PageTransition>
   );
 }

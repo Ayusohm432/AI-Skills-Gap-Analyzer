@@ -1,11 +1,34 @@
 fastapi
-uvicorn[standard]
+uvicorn
 motor
 python-multipart
 spacy>=3.8.0,<3.9.0
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+pymupdf>=1.24.0
+pytesseract>=0.3.10
+Pillow>=10.3.0
 pdfplumber
+python-docx>=1.1.0
 pydantic
 pydantic-settings
 gunicorn
 python-dotenv
+sentence-transformers>=2.2.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+bcrypt
+python-jose[cryptography]
+passlib[bcrypt]
+slowapi
+email-validator
+requests
+httpx>=0.27.0
+pandas
+kagglehub
+numpy
+google-genai>=1.0.0
+apscheduler>=3.10.0,<4.0
+# ── Authentication additions ──────────────────────────────────────────────────
+itsdangerous>=2.1.0
+supabase>=2.0.0
+# tensorflow

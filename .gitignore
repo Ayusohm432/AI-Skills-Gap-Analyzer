@@ -17,6 +17,7 @@ __pycache__/
 # Virtual environments
 venv/
 env/
+venv_gpu
 .env
 .venv
 
@@ -40,3 +41,5 @@ pnpm-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+IMPLEMENTATION_PLAN_WITH_ML.pdf
+AI-Skills-Gap-Analyzer.code-workspace

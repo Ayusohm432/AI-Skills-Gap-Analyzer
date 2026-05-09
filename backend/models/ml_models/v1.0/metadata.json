@@ -1,0 +1,24 @@
+{
+    "model_name": "K-Means Skill Clusterer + RF Role Predictor + Missing-Skills LSTM",
+    "version": "v1.0",
+    "training_date": "2026-04-17T11:34:57+00:00",
+    "accuracy": 0.0213,
+    "f1_score": 0.0213,
+    "training_samples": 5424,
+    "test_samples": 0,
+    "git_commit": "b8bae6f",
+    "extra": {
+        "model_name": "K-Means Skill Clusterer",
+        "version": "1.0",
+        "timestamp": "2026-04-17T11:34:57.199581",
+        "n_clusters": 13,
+        "n_skills_trained": 5424,
+        "embeddings_dim": 384,
+        "metrics": {
+            "silhouette_score": 0.0213,
+            "davies_bouldin_score": 4.974,
+            "calinski_harabasz_score": 50.095
+        },
+        "success": true
+    }
+}
