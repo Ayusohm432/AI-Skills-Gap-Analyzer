@@ -134,7 +134,7 @@ async def get_market_demand(
     role: str = Query(
         ...,
         description="Target job role. Use GET /api/v1/market/roles to see available options.",
-        example="Backend Developer",
+        examples="Backend Developer",
         min_length=2,
         max_length=100,
     ),
@@ -194,7 +194,7 @@ async def force_market_refresh(
     role: str | None = Query(
         default=None,
         description="Refresh a single role or all tracked roles. If the role is new, it will be auto-tracked.",
-        example="Data Scientist",
+        examples="Data Scientist",
     ),
     current_user: dict = Depends(get_current_user),
 ):
@@ -261,7 +261,7 @@ async def get_top_companies(
     role: str = Query(
         ...,
         description="Target job role. Use GET /api/v1/market/roles to see available options.",
-        example="Backend Developer",
+        examples="Backend Developer",
         min_length=2,
         max_length=100,
     ),
@@ -328,7 +328,7 @@ async def get_work_modes(
     role: str = Query(
         ...,
         description="Target job role. Use GET /api/v1/market/roles to see available options.",
-        example="Backend Developer",
+        examples="Backend Developer",
         min_length=2,
         max_length=100,
     ),

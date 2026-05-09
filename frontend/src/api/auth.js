@@ -17,22 +17,36 @@ export const loginApi = async (email, password) => {
   throw new Error(errorData.detail || 'Invalid credentials');
 };
 
-export const registerApi = async (name, email, password) => {
-  const res = await secureFetch('/api/v1/auth/register', {
+export const sendSignupOtpApi = async (email) => {
+  const res = await secureFetch('/api/v1/auth/signup/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password })
+    body: JSON.stringify({ email })
   });
   
   if (res.ok) {
-    // Phase 1 backend returns message/id, so we need to login after register 
-    // or return login data. My backend returns message. 
-    // Let's call login immediately after successful registration
-    return loginApi(email, password);
+    return await res.json();
   }
   
   const errorData = await res.json().catch(() => ({}));
-  throw new Error(errorData.detail || 'Registration failed');
+  throw new Error(errorData.detail || 'Failed to send verification code');
+};
+
+export const verifySignupOtpApi = async (email, otp, name, password) => {
+  const res = await secureFetch('/api/v1/auth/signup/verify-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, otp, name, password })
+  });
+  
+  if (res.ok) {
+    const data = await res.json();
+    setAccessToken(data.access_token);
+    return data;
+  }
+  
+  const errorData = await res.json().catch(() => ({}));
+  throw new Error(errorData.detail || 'Verification failed');
 };
 
 export const refreshTokenApi = async () => {
