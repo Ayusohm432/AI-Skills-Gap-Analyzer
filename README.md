@@ -1,5 +1,11 @@
 # AI Skill Gap Analyzer Platform
 
+## 🌐 Platforms
+
+- **Production (Live App):** [Visit Production](https://ayusohm432.github.io/AI-Skills-Gap-Analyzer/)
+- **Development (Staging App):** [Visit Development](https://ayusohm432.github.io/AI-Skills-Gap-Analyzer/dev/)
+
+
 "Google Maps for Career Development"
 
 This platform analyzes a student's resume, compares it with real job descriptions, identifies missing skills, and generates a personalized learning roadmap with a Job Readiness Score.
