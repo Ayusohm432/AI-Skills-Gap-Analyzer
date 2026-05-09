@@ -43,12 +43,24 @@ class UserCreate(UserBase):
     password: str
 
 class UserInDB(UserBase):
-    hashed_password: str
+    hashed_password: Optional[str] = None  # None for pure OAuth users
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     analysis_history: List[PyObjectId] = []
     target_role: Optional[str] = None
     skills: List[str] = []
+    # ── Auth provider fields ───────────────────────────────────────────
+    github_username: Optional[str] = None
+    auth_provider: Optional[str] = Field(
+        default="local",
+        description="local | google | github | supabase",
+    )
+    oauth_provider_id: Optional[str] = None
+    email_verified: bool = False
+    picture: Optional[str] = None
+    github_access_token: Optional[str] = Field(default=None, description="Encrypted GitHub OAuth token")
+    github_refresh_token: Optional[str] = Field(default=None, description="Encrypted GitHub OAuth refresh token")
+
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -61,7 +73,11 @@ class UserInDB(UserBase):
                 "hashed_password": "somehashedpassword",
                 "analysis_history": [],
                 "target_role": "Backend Developer",
-                "skills": ["Python", "FastAPI"]
+                "skills": ["Python", "FastAPI"],
+                "github_username": "octocat",
+                "auth_provider": "local",
+                "email_verified": True,
+                "picture": None,
             }
         }
     )
@@ -73,6 +89,18 @@ class UserResponse(UserBase):
     analysis_history: List[PyObjectId] = []
     target_role: Optional[str] = None
     skills: List[str] = []
+    # ── Auth / provider fields ─────────────────────────────────────────
+    github_username: Optional[str] = None
+    auth_provider: Optional[str] = Field(
+        default="local",
+        description="local | google | github | supabase",
+    )
+    oauth_provider_id: Optional[str] = None
+    email_verified: bool = False
+    picture: Optional[str] = Field(
+        default=None,
+        description="Profile photo URL (populated from OAuth provider)",
+    )
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -87,7 +115,12 @@ class UserResponse(UserBase):
                 "updated_at": "2023-01-01T12:00:00Z",
                 "analysis_history": [],
                 "target_role": "Backend Developer",
-                "skills": ["Python", "FastAPI"]
+                "skills": ["Python", "FastAPI"],
+                "github_username": "octocat",
+                "auth_provider": "github",
+                "oauth_provider_id": "12345678",
+                "email_verified": True,
+                "picture": "https://avatars.githubusercontent.com/u/12345678",
             }
         }
     )
@@ -120,6 +153,7 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     target_role: Optional[str] = None
     skills: Optional[List[str]] = None
+    github_username: Optional[str] = None
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -128,7 +162,8 @@ class UserUpdate(BaseModel):
             "example": {
                 "name": "Updated User Name",
                 "target_role": "Full-Stack Developer",
-                "skills": ["Python", "FastAPI", "React", "MongoDB"]
+                "skills": ["Python", "FastAPI", "React", "MongoDB"],
+                "github_username": "octocat"
             }
         }
     )
@@ -182,6 +217,7 @@ class AnalysisResult(BaseModel):
     model_version          – version string matching ML_MODEL_VERSION env var
     """
     # ── Core ──────────────────────────────────────────────────────────
+    analysis_id:          Optional[str] = Field(default=None, description="The DB ID of the generated analysis")
     predicted_role:       str          = Field(description="The ML/NLP-predicted (or user-selected) role")
     skills_detected:      List[str]
     skill_confidences:    dict                     = Field(default_factory=dict,
@@ -456,7 +492,7 @@ class InterviewStartRequest(BaseModel):
     )
 
 class InterviewResponseRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000, description="User's response to the interviewer's question")
+    message: str = Field(..., min_length=1, max_length=8000, description="User's response to the interviewer's question")
 
 class InterviewSessionResponse(BaseModel):
     session_id: str
@@ -477,3 +513,80 @@ class InterviewSessionResponse(BaseModel):
             }
         }
     )
+
+# ── Readiness Levels Models ───────────────────────────────────────────────────
+
+class ReadinessLevel(BaseModel):
+    score: float = Field(ge=0.0, le=100.0)
+    matched_skills: List[str]
+    missing_skills: List[str]
+    required_skills: List[str]
+
+class ReadinessLevelResponse(BaseModel):
+    role: str
+    beginner: Optional[ReadinessLevel] = None
+    intermediate: Optional[ReadinessLevel] = None
+    advanced: Optional[ReadinessLevel] = None
+    no_analysis: bool = False
+
+
+# ── Market Companies & Work Mode Models ────────────────────────────────────
+
+class CompanyInfo(BaseModel):
+    name:      str = Field(description="Company name")
+    logo_url:  str = Field(description="URL to the company's logo image")
+    job_count: int = Field(description="Approximate number of open positions for this role")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name":      "Google",
+                "logo_url":  "https://logo.clearbit.com/google.com",
+                "job_count": 120,
+            }
+        }
+    }
+
+
+class TopCompaniesResponse(BaseModel):
+    role:      str              = Field(description="Target job role queried")
+    companies: List[CompanyInfo] = Field(description="Top hiring companies for the role (up to 5)")
+    data_source: str            = Field(default="seeded", description="'seeded' | 'live'")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "role": "Backend Developer",
+                "data_source": "seeded",
+                "companies": [
+                    {"name": "Google",    "logo_url": "https://logo.clearbit.com/google.com",    "job_count": 120},
+                    {"name": "Amazon",   "logo_url": "https://logo.clearbit.com/amazon.com",    "job_count": 95},
+                    {"name": "Flipkart", "logo_url": "https://logo.clearbit.com/flipkart.com", "job_count": 80},
+                    {"name": "Razorpay", "logo_url": "https://logo.clearbit.com/razorpay.com", "job_count": 45},
+                    {"name": "Swiggy",   "logo_url": "https://logo.clearbit.com/swiggy.com",   "job_count": 38},
+                ],
+            }
+        }
+    }
+
+
+class WorkModeBreakdown(BaseModel):
+    remote: float  = Field(ge=0.0, le=100.0, description="Percentage of remote positions")
+    hybrid: float  = Field(ge=0.0, le=100.0, description="Percentage of hybrid positions")
+    onsite: float  = Field(ge=0.0, le=100.0, description="Percentage of onsite positions")
+
+
+class WorkModeResponse(BaseModel):
+    role:        str               = Field(description="Target job role queried")
+    breakdown:   WorkModeBreakdown = Field(description="Work mode percentage breakdown")
+    data_source: str               = Field(default="seeded", description="'seeded' | 'live'")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "role": "Backend Developer",
+                "data_source": "seeded",
+                "breakdown": {"remote": 35.0, "hybrid": 45.0, "onsite": 20.0},
+            }
+        }
+    }

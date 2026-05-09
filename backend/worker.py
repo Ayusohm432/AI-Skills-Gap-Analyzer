@@ -38,7 +38,9 @@ from ml_inference import (
     predict_missing_skills,
     compute_readiness_score,
     rank_missing_skills,
+    _DEFAULT_ROLES_DB,
 )
+
 from nlp.engine import (
     extract_text,
     extract_text_from_pdf,
@@ -96,13 +98,6 @@ async def _set_status(
     )
 
 
-_DEFAULT_ROLES_DB = {
-    "Data Scientist":            ["Python", "SQL", "Machine Learning", "Statistics", "Pandas", "TensorFlow"],
-    "Machine Learning Engineer": ["Python", "Docker", "Machine Learning", "TensorFlow", "MLOps", "AWS"],
-    "Backend Developer":         ["Node.js", "Python", "SQL", "Docker", "AWS", "API Design", "MongoDB", "FastAPI"],
-    "Frontend Developer":        ["React", "JavaScript", "HTML", "CSS", "TypeScript", "TailwindCSS", "Next.js"],
-    "Cyber Security Analyst":    ["Linux", "Networking", "Python", "SIEM", "Firewalls", "Cryptography"],
-}
 
 
 def _static_skill_gap(role: str, found_skills: list[str]) -> list[str]:
@@ -202,7 +197,7 @@ async def run_analysis(
 
             # When ML returned low-confidence override to "Auto Detect" so the
             # frontend knows the role was not reliably determined.
-            if ml_role_result["source"] == "low_confidence":
+            if ml_role_result["source"] == "low_confidence" and role == "Auto Detect":
                 target_role = "Auto Detect"
 
             logger.info("[job=%s] NLP role=%s (ml_source=%s)", job_id, target_role, ml_role_result["source"])
@@ -292,7 +287,7 @@ async def run_analysis(
             seniority=seniority,
         )
         if not interview_qs:
-            # Fallback: use static question bank (no GEMINI_API_KEY or API error)
+            # Fallback: use static question bank (no AI key set or API error)
             logger.warning(
                 "[job=%s] AI interview generation unavailable – using static question bank",
                 job_id,

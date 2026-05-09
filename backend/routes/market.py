@@ -25,9 +25,29 @@ from services.market_service import (
     _append_snapshot,
     ROLES,
 )
+from database import market_meta_collection
+from models import TopCompaniesResponse, CompanyInfo, WorkModeResponse, WorkModeBreakdown
+import time
 
 logger = logging.getLogger("routes.market")
 router = APIRouter()
+
+# ── In-memory TTL cache for market_meta endpoints (1 hour) ──────────────────
+_meta_cache: dict[str, tuple[float, dict]] = {}  # key → (timestamp, data)
+_META_CACHE_TTL = 3600  # 1 hour in seconds
+
+
+def _get_meta_cache(key: str) -> dict | None:
+    """Return cached data if still fresh, else None."""
+    entry = _meta_cache.get(key)
+    if entry and (time.time() - entry[0]) < _META_CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _set_meta_cache(key: str, data: dict) -> None:
+    _meta_cache[key] = (time.time(), data)
+
 
 
 # ── Response models ───────────────────────────────────────────────────────────
@@ -204,3 +224,146 @@ async def force_market_refresh(
         refreshed=refreshed,
         message=f"Successfully refreshed {len(refreshed)} role(s).",
     )
+
+
+# ── Market Meta Endpoints ──────────────────────────────────────────────────
+
+@router.get(
+    "/market/companies",
+    response_model=TopCompaniesResponse,
+    summary="Top hiring companies for a role",
+    description=(
+        "Returns the top 5 companies actively hiring for the specified role. "
+        "Each entry includes the company name, a logo URL (Clearbit CDN), and approximate "
+        "open job count. Results are cached for 1 hour."
+    ),
+    tags=["Market Demand"],
+    responses={
+        404: {"description": "Role not found in market data."},
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "role": "Backend Developer",
+                        "data_source": "seeded",
+                        "companies": [
+                            {"name": "Google",   "logo_url": "https://logo.clearbit.com/google.com",   "job_count": 120},
+                            {"name": "Amazon",   "logo_url": "https://logo.clearbit.com/amazon.com",   "job_count": 95},
+                            {"name": "Flipkart", "logo_url": "https://logo.clearbit.com/flipkart.com", "job_count": 80},
+                        ],
+                    }
+                }
+            }
+        },
+    },
+)
+async def get_top_companies(
+    role: str = Query(
+        ...,
+        description="Target job role. Use GET /api/v1/market/roles to see available options.",
+        example="Backend Developer",
+        min_length=2,
+        max_length=100,
+    ),
+):
+    """
+    GET /api/v1/market/companies?role=Backend+Developer
+
+    Returns up to 5 top hiring companies. Data is seeded and may be enriched
+    via admin updates to the market_meta collection.
+    """
+    cache_key = f"companies:{role}"
+    cached = _get_meta_cache(cache_key)
+    if cached:
+        logger.debug("Cache hit: companies for role=%r", role)
+        return TopCompaniesResponse(**cached)
+
+    doc = await market_meta_collection.find_one({"role": role}, {"_id": 0})
+    if doc is None:
+        available = await list_all_roles()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error":           f"Role '{role}' not found in market company data.",
+                "available_roles": available,
+                "hint":            "Use GET /api/v1/market/roles for the full list.",
+            },
+        )
+
+    result = {
+        "role":        role,
+        "companies":   doc.get("companies", [])[:5],
+        "data_source": doc.get("data_source", "seeded"),
+    }
+    _set_meta_cache(cache_key, result)
+    logger.info("Companies fetched for role=%r  count=%d", role, len(result["companies"]))
+    return TopCompaniesResponse(**result)
+
+
+@router.get(
+    "/market/work-modes",
+    response_model=WorkModeResponse,
+    summary="Remote / hybrid / onsite breakdown for a role",
+    description=(
+        "Returns the percentage breakdown of remote, hybrid, and onsite positions "
+        "for the specified role based on market data. Results are cached for 1 hour."
+    ),
+    tags=["Market Demand"],
+    responses={
+        404: {"description": "Role not found in market data."},
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "role": "Backend Developer",
+                        "data_source": "seeded",
+                        "breakdown": {"remote": 35.0, "hybrid": 45.0, "onsite": 20.0},
+                    }
+                }
+            }
+        },
+    },
+)
+async def get_work_modes(
+    role: str = Query(
+        ...,
+        description="Target job role. Use GET /api/v1/market/roles to see available options.",
+        example="Backend Developer",
+        min_length=2,
+        max_length=100,
+    ),
+):
+    """
+    GET /api/v1/market/work-modes?role=Backend+Developer
+
+    Returns the remote/hybrid/onsite percentage breakdown. Percentages are
+    guaranteed to be in [0, 100] and sum to approximately 100.
+    """
+    cache_key = f"work-modes:{role}"
+    cached = _get_meta_cache(cache_key)
+    if cached:
+        logger.debug("Cache hit: work-modes for role=%r", role)
+        return WorkModeResponse(**cached)
+
+    doc = await market_meta_collection.find_one({"role": role}, {"_id": 0})
+    if doc is None:
+        available = await list_all_roles()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error":           f"Role '{role}' not found in market work-mode data.",
+                "available_roles": available,
+                "hint":            "Use GET /api/v1/market/roles for the full list.",
+            },
+        )
+
+    wm = doc.get("work_modes", {"remote": 33.0, "hybrid": 34.0, "onsite": 33.0})
+    result = {
+        "role":        role,
+        "breakdown":   WorkModeBreakdown(**wm),
+        "data_source": doc.get("data_source", "seeded"),
+    }
+    _set_meta_cache(cache_key, result)
+    logger.info("Work modes fetched for role=%r  breakdown=%s", role, wm)
+    return WorkModeResponse(**result)
+

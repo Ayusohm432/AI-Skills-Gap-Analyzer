@@ -6,9 +6,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getProfileApi, updateProfileApi, getHistoryApi } from '../api/user';
+import { getProgressApi, getBadgesApi, recordActionApi } from '../api/progress';
 import InteractiveBackground from '../components/InteractiveBackground';
 import Navbar from '../components/Navbar';
 import PageTransition from '../components/PageTransition';
+import XPBar from '../components/gamification/XPBar';
+import StreakCard from '../components/gamification/StreakCard';
+import BadgeGrid from '../components/gamification/BadgeGrid';
+import GithubSync from '../components/GithubSync';
 import { useNavigate } from 'react-router-dom';
 
 const fadeUp = (delay = 0) => ({
@@ -29,6 +34,8 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [history, setHistory] = useState([]);
+  const [progress, setProgress] = useState(null);
+  const [badges, setBadges] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
@@ -37,12 +44,16 @@ export default function ProfilePage() {
   useEffect(() => {
     const initPage = async () => {
       try {
-        const [profileData, historyData] = await Promise.all([
+        const [profileData, historyData, progressData, badgesData] = await Promise.all([
           getProfileApi(),
-          getHistoryApi()
+          getHistoryApi(),
+          getProgressApi().catch(() => null),
+          getBadgesApi().catch(() => ({ badges: [] }))
         ]);
         setProfile(profileData);
         setHistory(historyData);
+        setProgress(progressData);
+        setBadges(badgesData.badges || []);
       } catch (err) {
         console.error("Failed to fetch initial profile data", err);
         setMessage({ type: 'error', text: 'Error loading some profile data.' });
@@ -84,6 +95,66 @@ export default function ProfilePage() {
     }));
   };
 
+  const handleGithubSyncComplete = async (mergedSkills, username) => {
+    // Update local state with the new merged skills and username
+    const updatedProfile = {
+      ...profile,
+      skills: mergedSkills,
+      github_username: username
+    };
+    setProfile(updatedProfile);
+    
+    // Auto-save to backend
+    try {
+      setIsSaving(true);
+      await updateProfileApi({
+        name: updatedProfile.name,
+        target_role: updatedProfile.target_role,
+        skills: updatedProfile.skills,
+        github_username: updatedProfile.github_username
+      });
+      setMessage({ type: 'success', text: 'GitHub profile synced and saved!' });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Synced, but failed to save to profile.' });
+    } finally {
+      setIsSaving(false);
+    }
+
+    // Automatically trigger XP action for analyzing GitHub
+    await recordActionApi('github_analyzed').catch(() => {});
+    
+    // Refresh Gamification stats to reflect new XP
+    const [progressData, badgesData] = await Promise.all([
+      getProgressApi().catch(() => null),
+      getBadgesApi().catch(() => ({ badges: [] }))
+    ]);
+    if (progressData) setProgress(progressData);
+    if (badgesData) setBadges(badgesData.badges || []);
+  };
+
+  const handleGithubDisconnect = async () => {
+    const updatedProfile = {
+      ...profile,
+      github_username: null
+    };
+    setProfile(updatedProfile);
+    
+    try {
+      setIsSaving(true);
+      await updateProfileApi({
+        name: updatedProfile.name,
+        target_role: updatedProfile.target_role,
+        skills: updatedProfile.skills,
+        github_username: null
+      });
+      setMessage({ type: 'success', text: 'GitHub profile disconnected.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to disconnect GitHub.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleViewAnalysis = (analysis) => {
     localStorage.setItem("analysisResult", JSON.stringify(analysis));
     navigate("/dashboard");
@@ -111,8 +182,19 @@ export default function ProfilePage() {
       const updated = await updateProfileApi({
         name: profile.name,
         target_role: profile.target_role,
-        skills: profile.skills
+        skills: profile.skills,
+        github_username: profile.github_username
       });
+      
+      // Award XP for updating profile/adding skills
+      await recordActionApi('skill_added').catch(() => {});
+      const [progressData, badgesData] = await Promise.all([
+        getProgressApi().catch(() => null),
+        getBadgesApi().catch(() => ({ badges: [] }))
+      ]);
+      if (progressData) setProgress(progressData);
+      if (badgesData) setBadges(badgesData.badges || []);
+
       setProfile(updated);
       updateUserState(prev => ({ ...prev, name: updated.name }));
       setMessage({ type: 'success', text: 'Profile updated successfully!' });
@@ -177,10 +259,20 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 </motion.div>
+
+                {/* Gamification Stats */}
+                <motion.div {...fadeUp(0.25)}>
+                  <StreakCard progress={progress} />
+                </motion.div>
+                
               </div>
 
               {/* Main Form */}
-              <div className="md:col-span-2">
+              <div className="md:col-span-2 space-y-8">
+                
+                <motion.div {...fadeUp(0.12)}>
+                  <XPBar progress={progress} />
+                </motion.div>
                 <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay">
                   {message.text && (
                     <motion.div
@@ -307,9 +399,24 @@ export default function ProfilePage() {
                       </motion.button>
                     </div>
                   </form>
+
+                  {/* GitHub Sync Section - Moved outside form to prevent nesting */}
+                  <div className="mt-8 pt-8 border-t border-[var(--border-subtle)]">
+                    <GithubSync 
+                      currentSkills={profile.skills || []} 
+                      currentUsername={profile.github_username}
+                      onSyncComplete={handleGithubSyncComplete} 
+                      onDisconnect={handleGithubDisconnect}
+                    />
+                  </div>
                 </motion.div>
               </div>
             </div>
+
+            {/* Gamification Badges */}
+            <motion.div {...fadeUp(0.25)} className="mt-8">
+               <BadgeGrid badges={badges} />
+            </motion.div>
 
             {/* Analysis History Section */}
             <motion.div {...fadeUp(0.3)} className="mt-12">
