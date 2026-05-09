@@ -1,0 +1,532 @@
+{
+    "version": "v1.0",
+    "evaluated_at": "2026-05-02T16:13:00.109218+00:00",
+    "git_commit": "75e7fc2",
+    "models": {
+        "skill_clusterer": {
+            "status": "warn",
+            "metrics": {
+                "silhouette": 0.021878,
+                "davies_bouldin": 4.96608,
+                "calinski_harabasz": 51.877344,
+                "n_clusters": 13,
+                "n_skills": 5610
+            },
+            "cluster_samples": {
+                "7": [
+                    "Introduction",
+                    "Skills and Responsibilities",
+                    "Responsibilities",
+                    "Statistics",
+                    "IaaS vs PaaS vs SaaS"
+                ],
+                "8": [
+                    "Learn the Basics",
+                    "Java",
+                    "Object Oriented Programming",
+                    "Design Patterns",
+                    "Design Principles"
+                ],
+                "10": [
+                    "Python",
+                    "Conditionals",
+                    "Props",
+                    "Bash",
+                    "CSS"
+                ],
+                "5": [
+                    "Components",
+                    "JavaScript",
+                    "JSX",
+                    "HTML",
+                    "Computer Hardware Components"
+                ],
+                "12": [
+                    "Rust",
+                    "Pick a Language",
+                    "Ruby",
+                    "npm",
+                    "Vite"
+                ],
+                "11": [
+                    "Git",
+                    "GitHub",
+                    "Version Control Systems",
+                    "devops",
+                    "Developer Journey"
+                ],
+                "1": [
+                    "Basic Syntax",
+                    "C++",
+                    "Dependency Injection",
+                    "Variables",
+                    "Functions"
+                ],
+                "4": [
+                    "Internet",
+                    "backend",
+                    "HTTP",
+                    "HTTP Methods",
+                    "TCP"
+                ],
+                "9": [
+                    "Linear Algebra",
+                    "Search Engines",
+                    "Blockchain Structure",
+                    "GraphQL Queries",
+                    "Problems GraphQL Solves"
+                ],
+                "0": [
+                    "RDBMS Benefits and Limitations",
+                    "What are Relational Databases",
+                    "Data Types",
+                    "SQL vs NoSQL",
+                    "SQL vs NoSQL Databases"
+                ],
+                "6": [
+                    "Testing",
+                    "Manage your Testing",
+                    "Test Oracles",
+                    "Test Prioritization",
+                    "qTest"
+                ],
+                "3": [
+                    "Machine Learning",
+                    "Deep Learning",
+                    "Vector",
+                    "Transformer Models and LLMs",
+                    "Why Red Team AI Systems"
+                ],
+                "2": [
+                    "Authentication",
+                    "Security",
+                    "AI Security Fundamentals",
+                    "Basic Blockchain Knowledge",
+                    "Basic Blockchain Operations"
+                ]
+            },
+            "targets_met": {
+                "silhouette": false,
+                "davies_bouldin": true,
+                "calinski_harabasz": true
+            }
+        },
+        "role_predictor": {
+            "status": "warn",
+            "metrics": {
+                "accuracy": 0.984444,
+                "f1_weighted": 0.985082,
+                "min_precision": 0.636364,
+                "min_recall": 0.857143,
+                "avg_brier": 0.008547,
+                "inference_ms": 0.184,
+                "auc_roc": 0.999618
+            },
+            "per_role": {
+                "Ai Agents": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Ai Data Scientist": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 3
+                },
+                "Ai Engineer": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Ai Red Teaming": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Android": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Angular": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Api Design": {
+                    "precision": 1.0,
+                    "recall": 0.857143,
+                    "f1": 0.923077,
+                    "support": 7
+                },
+                "Aspnet Core": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Aws": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Backend": {
+                    "precision": 1.0,
+                    "recall": 0.857143,
+                    "f1": 0.923077,
+                    "support": 7
+                },
+                "Bi Analyst": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Blockchain": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Cloudflare": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Code Review": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Computer Science": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Cpp": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Cyber Security": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Data Analyst": {
+                    "precision": 0.857143,
+                    "recall": 0.857143,
+                    "f1": 0.857143,
+                    "support": 7
+                },
+                "Data Engineer": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Datastructures And Algorithms": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Design System": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Devops": {
+                    "precision": 1.0,
+                    "recall": 0.857143,
+                    "f1": 0.923077,
+                    "support": 7
+                },
+                "Devrel": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Docker": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Engineering Manager": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Flutter": {
+                    "precision": 0.888889,
+                    "recall": 1.0,
+                    "f1": 0.941176,
+                    "support": 8
+                },
+                "Frontend": {
+                    "precision": 0.875,
+                    "recall": 1.0,
+                    "f1": 0.933333,
+                    "support": 7
+                },
+                "Full Stack": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Game Developer": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Git Github": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Golang": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Graphql": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Ios": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Java": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Javascript": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Kubernetes": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Linux": {
+                    "precision": 1.0,
+                    "recall": 0.857143,
+                    "f1": 0.923077,
+                    "support": 7
+                },
+                "Machine Learning": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Mlops": {
+                    "precision": 0.636364,
+                    "recall": 1.0,
+                    "f1": 0.777778,
+                    "support": 7
+                },
+                "Mongodb": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Nextjs": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Nodejs": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Php": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Postgresql Dba": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Product Manager": {
+                    "precision": 1.0,
+                    "recall": 0.875,
+                    "f1": 0.933333,
+                    "support": 8
+                },
+                "Prompt Engineering": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Python": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Qa": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "React": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "React Native": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Redis": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Rust": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Server Side Game Developer": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Software Architect": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 8
+                },
+                "Software Design Architecture": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Spring Boot": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Sql": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "System Design": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Technical Writer": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Terraform": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Typescript": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Ux Design": {
+                    "precision": 1.0,
+                    "recall": 1.0,
+                    "f1": 1.0,
+                    "support": 7
+                },
+                "Vue": {
+                    "precision": 1.0,
+                    "recall": 0.875,
+                    "f1": 0.933333,
+                    "support": 8
+                }
+            },
+            "targets_met": {
+                "f1_weighted": true,
+                "min_precision": false,
+                "min_recall": true,
+                "auc_roc": true,
+                "avg_brier": true,
+                "inference_ms": true
+            }
+        },
+        "missing_skills_lstm": {
+            "status": "pass",
+            "metrics": {
+                "recall_at_10": 0.928005,
+                "recall_at_20": 0.996513,
+                "mrr": 0.899503,
+                "latency_ms": 2.23
+            },
+            "targets_met": {
+                "recall_at_10": true,
+                "recall_at_20": true,
+                "mrr": true,
+                "latency_ms": true
+            }
+        }
+    },
+    "overall_status": "warn",
+    "summary": "1/3 models passed, 2 warned, 0 failed."
+}
