@@ -135,7 +135,7 @@ async def get_benchmarks(
     role:         str  = Query(
         ...,
         description="Target job role to benchmark against (e.g. 'Backend Developer')",
-        example="Backend Developer",
+        examples="Backend Developer",
         min_length=2,
         max_length=100,
     ),
@@ -169,7 +169,7 @@ async def compare_roles(
     roles:        str  = Query(
         ...,
         description="Comma-separated list of roles (max 5). E.g. 'Backend Developer,Data Scientist'",
-        example="Backend Developer,Data Scientist",
+        examples="Backend Developer,Data Scientist",
     ),
     current_user: dict = Depends(get_current_user),
 ):
