@@ -44,3 +44,9 @@ pnpm-debug.log*
 .env.production.local
 IMPLEMENTATION_PLAN_WITH_ML.pdf
 AI-Skills-Gap-Analyzer.code-workspace
+
+# Environment files with secrets
+backend/.env.development
+backend/.env.production
+backend/.env.staging
+*.env.*

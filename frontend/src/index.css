@@ -430,3 +430,21 @@ input:focus, select:focus, textarea:focus {
   50%  { border-color: #f0c060;           box-shadow: 0 0 0 6px rgba(232,168,73,0.08); }
   100% { border-color: var(--accent-warm); box-shadow: 0 0 0 0 rgba(232,168,73,0); }
 }
+
+/* Animated connector line for progress stepper */
+@keyframes shimmer-connector {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-connector {
+  position: relative;
+  overflow: hidden;
+}
+.animate-connector::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: shimmer-connector 1.5s infinite linear;
+}

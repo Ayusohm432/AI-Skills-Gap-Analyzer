@@ -260,9 +260,9 @@ export default function UploadPage() {
 
         <main className="flex-1 flex items-center justify-center p-6 pt-28 pb-12 relative z-10">
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.98 }}
+            initial={{ opacity: 0, y: 30, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ type: 'spring', stiffness: 260, damping: 22 }}
             className="w-full max-w-xl glass-card p-8 md:p-10 relative overflow-hidden noise-overlay"
           >
             {/* Warm ambient glow */}
@@ -533,11 +533,13 @@ export default function UploadPage() {
                                   </div>
                                   {/* Connector line */}
                                   {idx < PIPELINE_STEPS.length - 1 && (
-                                    <div className="flex-1 max-w-[40px] h-px mx-1 mt-[-18px]">
-                                      <div className={`h-full rounded-full transition-all duration-500 ${
+                                    <div className="flex-1 max-w-[40px] h-px mx-1 mt-[-18px] bg-[var(--border-subtle)] overflow-hidden relative">
+                                      <div className={`absolute inset-0 h-full transition-all duration-500 ${
                                         pipelineStep > idx
-                                          ? 'bg-[var(--accent-teal)]'
-                                          : 'bg-[var(--border-subtle)]'
+                                          ? 'bg-[var(--accent-teal)] w-full'
+                                          : pipelineStep === idx
+                                            ? 'bg-[var(--accent-warm)] w-full animate-connector'
+                                            : 'w-0'
                                       }`} />
                                     </div>
                                   )}
