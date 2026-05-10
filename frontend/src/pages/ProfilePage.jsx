@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  User, Mail, Briefcase, Award, Save, 
-  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight 
+  User, Mail, Briefcase, Award, Save, Camera,
+  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight, Github, Clock, TrendingUp
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getProfileApi, updateProfileApi, getHistoryApi } from '../api/user';
+import { getProfileApi, updateProfileApi, getHistoryApi, disconnectGithubApi } from '../api/user';
 import { getProgressApi, getBadgesApi, recordActionApi } from '../api/progress';
 import InteractiveBackground from '../components/InteractiveBackground';
 import Navbar from '../components/Navbar';
@@ -143,20 +143,16 @@ export default function ProfilePage() {
   };
 
   const handleGithubDisconnect = async () => {
-    const updatedProfile = {
-      ...profile,
-      github_username: null
-    };
-    setProfile(updatedProfile);
-    
     try {
       setIsSaving(true);
-      await updateProfileApi({
-        name: updatedProfile.name,
-        target_role: updatedProfile.target_role,
-        skills: updatedProfile.skills,
+      await disconnectGithubApi();
+      
+      const updatedProfile = {
+        ...profile,
         github_username: null
-      });
+      };
+      setProfile(updatedProfile);
+      
       setMessage({ type: 'success', text: 'GitHub profile disconnected.' });
     } catch (err) {
       setMessage({ type: 'error', text: 'Failed to disconnect GitHub.' });
@@ -242,14 +238,15 @@ export default function ProfilePage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {/* Sidebar Info */}
               <div className="md:col-span-1 space-y-6">
-                <motion.div {...fadeUp(0.1)} className="glass-card p-6 text-center">
-                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[var(--accent-warm)] to-[var(--accent-coral)] mx-auto mb-4 flex items-center justify-center shadow-lg">
-                    <User size={40} className="text-white" />
-                  </div>
-                  <h2 className="text-lg font-bold text-[var(--text-primary)]">{profile.name || 'Anonymous'}</h2>
-                  <p className="text-xs text-[var(--text-muted)] mb-4">{profile.email}</p>
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-[10px] font-bold uppercase tracking-wider">
-                    Verified User
+                <motion.div {...fadeUp(0.1)} className="glass-card p-6 text-center relative">
+                {/* Avatar with upload */}
+                <div className="relative w-24 h-24 mx-auto mb-4">
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[var(--accent-warm)] to-[var(--accent-coral)] flex items-center justify-center shadow-lg overflow-hidden">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <User size={40} className="text-white" />
+                    )}
                   </div>
                   <button
                     type="button"
@@ -304,6 +301,16 @@ export default function ProfilePage() {
                 <motion.div {...fadeUp(0.12)}>
                   <XPBar progress={progress} />
                 </motion.div>
+
+                {profile.github_username && (
+                  <motion.div {...fadeUp(0.13)} className="px-4 py-3 rounded-xl bg-[var(--accent-teal-dim)] border border-[var(--accent-teal)]/20 text-[var(--accent-teal)] text-sm flex items-start gap-3">
+                    <Github size={18} className="mt-0.5 shrink-0" />
+                    <div>
+                      <strong>Your GitHub account (@{profile.github_username}) is linked</strong> — your public repositories are being used to enrich your skill analysis.
+                    </div>
+                  </motion.div>
+                )}
+
                 <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay">
                   {message.text && (
                     <motion.div
