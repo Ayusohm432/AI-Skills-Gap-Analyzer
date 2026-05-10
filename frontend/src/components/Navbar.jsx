@@ -4,6 +4,20 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Menu, X, LogOut, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
+const mobileMenuVars = {
+  hidden: { x: '100%', opacity: 0 },
+  visible: {
+    x: 0, opacity: 1,
+    transition: { type: 'spring', stiffness: 280, damping: 28, staggerChildren: 0.06, delayChildren: 0.1 }
+  },
+  exit: { x: '100%', opacity: 0, transition: { duration: 0.25, ease: [0.4, 0, 1, 1] } }
+};
+
+const mobileLinkVars = {
+  hidden: { opacity: 0, x: 20 },
+  visible: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+};
+
 export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -125,71 +139,114 @@ export default function Navbar() {
           </div>
 
           {/* Mobile Menu Toggle */}
-          <button
+          <motion.button
             onClick={() => setMobileOpen(!mobileOpen)}
             className="md:hidden p-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors"
             id="nav-mobile-toggle"
+            whileTap={{ scale: 0.9 }}
           >
-            {mobileOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={mobileOpen ? 'close' : 'open'}
+                initial={{ rotate: -90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: 90, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+              </motion.div>
+            </AnimatePresence>
+          </motion.button>
         </div>
       </div>
 
-      {/* Mobile Menu */}
+      {/* Mobile Overlay */}
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="md:hidden overflow-hidden bg-[var(--bg-surface)] border-b border-[var(--border-subtle)]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setMobileOpen(false)}
+            className="md:hidden fixed inset-0 bg-black/50 z-40"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Menu — slide from right */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            variants={mobileMenuVars}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="md:hidden fixed top-0 right-0 h-full w-72 bg-[var(--bg-surface)] border-l border-[var(--border-subtle)] z-50 shadow-2xl flex flex-col"
           >
-            <div className="px-6 py-4 space-y-1">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                    isActive(link.to)
-                      ? 'text-[var(--accent-warm)] bg-[var(--accent-warm-dim)]'
-                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
-                  }`}
-                >
-                  {link.label}
-                </Link>
-              ))}
-              <div className="pt-3 border-t border-[var(--border-subtle)] mt-3 space-y-1">
-                {isAuthenticated ? (
-                  <>
-                    <div className="px-4 py-3 text-sm text-[var(--text-muted)] flex items-center gap-2">
-                       {user?.picture ? (
-                         <img src={user.picture} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-[var(--border-subtle)]" />
-                       ) : (
-                         <User size={14} className="text-[var(--accent-teal)]" />
-                       )}
-                       {user?.name || user?.email?.split('@')[0] || 'User'}
-                    </div>
-                    <button 
-                      onClick={async () => { await logout(); navigate('/login'); setMobileOpen(false); }} 
-                      className="w-full text-left px-4 py-3 rounded-lg text-sm font-medium text-[var(--accent-coral)] hover:bg-[var(--bg-elevated)] flex items-center gap-2"
-                    >
-                      <LogOut size={14} />
-                      Sign out
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <Link onClick={() => setMobileOpen(false)} to="/login" className="block px-4 py-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]">
-                      Sign in
-                    </Link>
-                    <Link onClick={() => setMobileOpen(false)} to="/register" className="block px-4 py-3 rounded-lg text-sm font-medium text-[var(--accent-warm)]">
-                      Create account
-                    </Link>
-                  </>
-                )}
-              </div>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--border-subtle)]">
+              <span className="text-sm font-semibold text-[var(--text-primary)]">Menu</span>
+              <motion.button
+                onClick={() => setMobileOpen(false)}
+                whileTap={{ scale: 0.9 }}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors"
+              >
+                <X size={18} />
+              </motion.button>
             </div>
+
+            {/* Links */}
+            <div className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
+              {navLinks.map((link) => (
+                <motion.div key={link.to} variants={mobileLinkVars}>
+                  <Link
+                    to={link.to}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                      isActive(link.to)
+                        ? 'text-[var(--accent-warm)] bg-[var(--accent-warm-dim)] border border-[var(--accent-warm)]/20'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {isActive(link.to) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-warm)] shrink-0" />
+                    )}
+                    {link.label}
+                  </Link>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Auth footer */}
+            <motion.div variants={mobileLinkVars} className="px-4 py-4 border-t border-[var(--border-subtle)] space-y-2">
+              {isAuthenticated ? (
+                <>
+                  <div className="px-4 py-3 text-sm text-[var(--text-muted)] flex items-center gap-2 rounded-xl bg-[var(--bg-elevated)]">
+                    {user?.picture ? (
+                      <img src={user.picture} alt="Avatar" className="w-6 h-6 rounded-full object-cover border border-[var(--border-subtle)]" />
+                    ) : (
+                      <User size={14} className="text-[var(--accent-teal)]" />
+                    )}
+                    {user?.name || user?.email?.split('@')[0] || 'User'}
+                  </div>
+                  <button
+                    onClick={async () => { await logout(); navigate('/login'); setMobileOpen(false); }}
+                    className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium text-[var(--accent-coral)] hover:bg-[var(--bg-elevated)] flex items-center gap-2 transition-colors"
+                  >
+                    <LogOut size={14} />
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link onClick={() => setMobileOpen(false)} to="/login" className="block px-4 py-3 rounded-xl text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors">
+                    Sign in
+                  </Link>
+                  <Link onClick={() => setMobileOpen(false)} to="/register" className="block px-4 py-3 rounded-xl text-sm font-semibold text-center bg-[var(--accent-warm)] text-black rounded-xl transition-all hover:opacity-90">
+                    Get Started Free
+                  </Link>
+                </>
+              )}
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
