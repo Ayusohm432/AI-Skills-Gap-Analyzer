@@ -399,13 +399,17 @@ export default function UploadPage() {
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 cursor-pointer min-h-[180px] flex flex-col items-center justify-center ${
+                    className={`relative rounded-2xl p-8 text-center transition-all duration-300 cursor-pointer min-h-[180px] flex flex-col items-center justify-center ${
                       isDragging
-                        ? 'border-[var(--accent-warm)] bg-[var(--accent-warm-dim)]'
+                        ? 'bg-[var(--accent-warm-dim)]'
                         : file
-                          ? 'border-[var(--accent-teal)]/40 bg-[var(--accent-teal-dim)]'
-                          : 'border-[var(--border-subtle)] bg-[var(--bg-deep)]/50 hover:border-[var(--border-hover)] hover:bg-[var(--bg-elevated)]/30'
+                          ? 'border-2 border-dashed border-[var(--accent-teal)]/40 bg-[var(--accent-teal-dim)]'
+                          : 'border-2 border-dashed border-[var(--border-subtle)] bg-[var(--bg-deep)]/50 hover:border-[var(--border-hover)] hover:bg-[var(--bg-elevated)]/30'
                     }`}
+                    style={isDragging ? {
+                      border: '2px dashed var(--accent-warm)',
+                      animation: 'dash-pulse 1s linear infinite',
+                    } : {}}
                     id="file-drop-zone"
                   >
                     <input

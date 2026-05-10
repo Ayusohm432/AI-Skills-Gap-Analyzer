@@ -48,7 +48,7 @@ const features = [
 
 // Static university/institution social-proof entries
 const trustedBy = [
-  'IIT Bombay', 'NIT Trichy', 'VIT Vellore', 'BITS Pilani', 'DTU Delhi', 'IIIT Hyderabad',
+  'GCE Gaya', 'NCE Chandi', 'NIT Patna', 'IIIT Bhagalpur', 'BCE Patna', 'MIT Muzaffarpur',
 ];
 
 export default function LandingPage() {

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
-  User, Mail, Briefcase, Award, Save, 
-  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight, Github 
+  User, Mail, Briefcase, Award, Save, Camera,
+  Loader2, CheckCircle2, AlertCircle, Plus, X, ChevronRight, Github, Clock, TrendingUp
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getProfileApi, updateProfileApi, getHistoryApi, disconnectGithubApi } from '../api/user';
@@ -40,6 +40,8 @@ export default function ProfilePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [newSkill, setNewSkill] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const avatarInputRef = useRef(null);
 
   useEffect(() => {
     const initPage = async () => {
@@ -93,6 +95,14 @@ export default function ProfilePage() {
       ...prev,
       skills: prev.skills.filter(s => s !== skillToRemove)
     }));
+  };
+
+  const handleAvatarChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setAvatarUrl(reader.result);
+    reader.readAsDataURL(file);
   };
 
   const handleGithubSyncComplete = async (mergedSkills, username) => {
@@ -228,23 +238,38 @@ export default function ProfilePage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {/* Sidebar Info */}
               <div className="md:col-span-1 space-y-6">
-                <motion.div {...fadeUp(0.1)} className="glass-card p-6 text-center">
-                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[var(--accent-warm)] to-[var(--accent-coral)] mx-auto mb-4 flex items-center justify-center shadow-lg">
-                    <User size={40} className="text-white" />
-                  </div>
-                  <h2 className="text-lg font-bold text-[var(--text-primary)]">{profile.name || 'Anonymous'}</h2>
-                  <p className="text-xs text-[var(--text-muted)] mb-4">{profile.email}</p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <div className="inline-flex items-center gap++-2 px-3 py-1 rounded-full bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-[10px] font-bold uppercase tracking-wider">
-                      Verified User
-                    </div>
-                    {profile.github_username && (
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] text-[10px] font-bold uppercase tracking-wider">
-                        <CheckCircle2 size={12} /> GitHub Connected
-                      </div>
+                <motion.div {...fadeUp(0.1)} className="glass-card p-6 text-center relative">
+                {/* Avatar with upload */}
+                <div className="relative w-24 h-24 mx-auto mb-4">
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[var(--accent-warm)] to-[var(--accent-coral)] flex items-center justify-center shadow-lg overflow-hidden">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <User size={40} className="text-white" />
                     )}
                   </div>
-                </motion.div>
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[var(--accent-warm)] flex items-center justify-center shadow-md hover:scale-110 transition-transform"
+                  >
+                    <Camera size={13} className="text-black" />
+                  </button>
+                  <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                </div>
+                <h2 className="text-lg font-bold text-[var(--text-primary)]">{profile.name || 'Anonymous'}</h2>
+                <p className="text-xs text-[var(--text-muted)] mb-4">{profile.email}</p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-[10px] font-bold uppercase tracking-wider">
+                    Verified User
+                  </div>
+                  {profile.github_username && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] text-[10px] font-bold uppercase tracking-wider">
+                      <CheckCircle2 size={12} /> GitHub Connected
+                    </div>
+                  )}
+                </div>
+              </motion.div>
 
                 <motion.div {...fadeUp(0.2)} className="glass-card p-6">
                   <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-4 flex items-center gap-2">
@@ -353,37 +378,41 @@ export default function ProfilePage() {
 
                     {/* Skills Management */}
                     <div>
-                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-3">
-                        My Skills
-                      </label>
+                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-3">My Skills</label>
                       <div className="flex flex-wrap gap-2 mb-4">
-                        {profile.skills?.map((skill) => (
-                          <span 
-                            key={skill}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-sm rounded-lg hover:border-[var(--accent-coral)]/30 group transition-all"
-                          >
-                            {skill}
-                            <button 
-                              type="button" 
-                              onClick={() => removeSkill(skill)}
-                              className="text-[var(--text-muted)] hover:text-[var(--accent-coral)] transition-colors"
+                        <AnimatePresence>
+                          {profile.skills?.map((skill, idx) => (
+                            <motion.span
+                              key={skill}
+                              initial={{ opacity: 0, scale: 0.7 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.7 }}
+                              transition={{ type: 'spring', stiffness: 400, damping: 22, delay: idx * 0.03 }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-sm rounded-lg hover:border-[var(--accent-coral)]/30 group transition-all"
                             >
-                              <X size={14} />
-                            </button>
-                          </span>
-                        ))}
+                              {skill}
+                              <button
+                                type="button"
+                                onClick={() => removeSkill(skill)}
+                                className="text-[var(--text-muted)] hover:text-[var(--accent-coral)] transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            </motion.span>
+                          ))}
+                        </AnimatePresence>
                         {profile.skills?.length === 0 && (
                           <p className="text-xs text-[var(--text-muted)] italic">No skills added yet. Add some below or run an analysis!</p>
                         )}
                       </div>
-                      
+
                       <div className="flex gap-2">
                         <input
                           type="text"
                           value={newSkill}
                           onChange={(e) => setNewSkill(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addSkill())}
-                          placeholder="Add a new skill (e.g. Python)"
+                          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSkill())}
+                          placeholder="Add a skill (e.g. Python) and press Enter"
                           className={`${inputClass} flex-1`}
                         />
                         <button
@@ -431,12 +460,15 @@ export default function ProfilePage() {
                <BadgeGrid badges={badges} />
             </motion.div>
 
-            {/* Analysis History Section */}
+            {/* Analysis History — Vertical Timeline */}
             <motion.div {...fadeUp(0.3)} className="mt-12">
               <div className="flex items-center justify-between mb-8">
                 <div>
-                  <h2 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Analysis History</h2>
-                  <p className="text-[var(--text-muted)] text-sm mt-1">Revisit your past skill gap assessments and roadmaps.</p>
+                  <h2 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight flex items-center gap-3">
+                    <Clock size={22} className="text-[var(--accent-lavender)]" />
+                    Activity Timeline
+                  </h2>
+                  <p className="text-[var(--text-muted)] text-sm mt-1">Your past skill gap assessments in chronological order.</p>
                 </div>
                 <div className="text-xs font-semibold px-3 py-1 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-muted)]">
                   {history?.length || 0} Reports
@@ -444,49 +476,67 @@ export default function ProfilePage() {
               </div>
 
               {history && history.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {history.map((item, idx) => (
-                    <motion.div
-                      key={item.id}
-                      {...fadeUp(0.3 + (idx * 0.05))}
-                      className="glass-card p-6 hover:border-[var(--accent-warm)]/30 transition-all group flex flex-col justify-between"
-                    >
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="p-2.5 rounded-xl bg-[var(--bg-deep)]/50 text-[var(--accent-warm)]">
-                          < Award size={20} />
-                        </div>
-                        <span className={`text-xl font-bold ${getScoreColor(item.readiness_score)}`}>
-                          {Math.round(item.readiness_score)}%
-                        </span>
-                      </div>
-                      
-                      <div className="mb-6">
-                        <h3 className="font-bold text-[var(--text-primary)] group-hover:text-[var(--accent-warm)] transition-colors line-clamp-1">
-                          {item.target_role}
-                        </h3>
-                        <p className="text-xs text-[var(--text-muted)] mt-1 flex items-center gap-1.5">
-                          Analyze on {formatDate(item.created_at)}
-                        </p>
-                      </div>
+                <div className="relative pl-8">
+                  {/* Vertical timeline line */}
+                  <div className="absolute left-3 top-2 bottom-2 w-px bg-gradient-to-b from-[var(--accent-lavender)] via-[var(--border-subtle)] to-transparent" />
 
-                      <button
-                        onClick={() => handleViewAnalysis(item)}
-                        className="w-full py-2.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs font-semibold hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-all flex items-center justify-center gap-2 group/btn"
+                  <div className="space-y-6">
+                    {history.map((item, idx) => (
+                      <motion.div
+                        key={item.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.3 + idx * 0.08, type: 'spring', stiffness: 260, damping: 22 }}
+                        className="relative"
                       >
-                        View Full Report
-                        <ChevronRight size={14} className="group-hover/btn:translate-x-0.5 transition-transform" />
-                      </button>
-                    </motion.div>
-                  ))}
+                        {/* Timeline dot */}
+                        <div className={`absolute -left-[21px] top-4 w-3 h-3 rounded-full border-2 ${
+                          idx === 0 ? 'bg-[var(--accent-lavender)] border-[var(--accent-lavender)]' : 'bg-[var(--bg-surface)] border-[var(--border-hover)]'
+                        }`} />
+
+                        <div className="glass-card p-5 hover:border-[var(--accent-lavender)]/30 transition-all group flex flex-col sm:flex-row sm:items-center gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-bold text-[var(--text-primary)] group-hover:text-[var(--accent-lavender)] transition-colors">
+                                {item.target_role}
+                              </h3>
+                              {idx === 0 && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--accent-lavender-dim)] text-[var(--accent-lavender)] border border-[var(--accent-lavender)]/20">Latest</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+                              <Clock size={10} />
+                              {formatDate(item.created_at)}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-4">
+                            <div className="text-center">
+                              <div className={`text-2xl font-black ${getScoreColor(item.readiness_score)}`}>
+                                {Math.round(item.readiness_score)}%
+                              </div>
+                              <div className="text-[10px] text-[var(--text-muted)] font-medium">Readiness</div>
+                            </div>
+                            <button
+                              onClick={() => handleViewAnalysis(item)}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs font-semibold hover:text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-all group/btn"
+                            >
+                              View <ChevronRight size={14} className="group-hover/btn:translate-x-0.5 transition-transform" />
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="glass-card p-12 text-center border-dashed border-2">
                   <div className="w-16 h-16 rounded-2xl bg-[var(--bg-deep)] flex items-center justify-center mx-auto mb-4 border border-[var(--border-subtle)]">
-                    <BookOpen size={24} className="text-[var(--text-muted)]" />
+                    <TrendingUp size={24} className="text-[var(--text-muted)]" />
                   </div>
-                  <h3 className="text-[var(--text-primary)] font-bold mb-1">No analysis history yet</h3>
+                  <h3 className="text-[var(--text-primary)] font-bold mb-1">No activity yet</h3>
                   <p className="text-[var(--text-muted)] text-sm mb-6 max-w-xs mx-auto">Upload your first resume to start tracking your skill gaps and career growth.</p>
-                  <button 
+                  <button
                     onClick={() => navigate('/upload')}
                     className="inline-flex items-center gap-2 text-[var(--accent-warm)] text-sm font-semibold hover:underline"
                   >

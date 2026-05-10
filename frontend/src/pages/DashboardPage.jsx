@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, PieChart, Pie } from "recharts";
 import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import {
   CheckCircle2, XCircle, Zap, Download, MessageSquare,
   ChevronRight, ArrowLeft, BookOpen, Loader2, Target, BarChart2, Activity, Filter, RefreshCw,
-  Check, ExternalLink, Clock, Trophy, Bot
+  Check, ExternalLink, Clock, Trophy, Bot, Share2
 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
@@ -55,6 +56,8 @@ export default function DashboardPage() {
   const readinessFetchedFor = useRef(null);
   const [selectedLevel, setSelectedLevel] = useState(null); // null | 'beginner' | 'intermediate' | 'advanced'
   const [readinessView, setReadinessView] = useState('overall'); // 'overall' | 'beginner' | 'intermediate' | 'advanced'
+  const [isSharing, setIsSharing] = useState(false);
+  const shareRef = useRef(null);
 
   // Cleanup swap polling on unmount
   useEffect(() => {
@@ -347,6 +350,27 @@ export default function DashboardPage() {
     }, 100);
   };
 
+  const handleShareResults = async () => {
+    if (!shareRef.current) return;
+    setIsSharing(true);
+    try {
+      const canvas = await html2canvas(shareRef.current, {
+        backgroundColor: '#0f0f0f',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+      const link = document.createElement('a');
+      link.download = `SkillGap_Results_${data.target_role?.replace(/\s+/g, '_') || 'Report'}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (err) {
+      console.error('Share screenshot failed:', err);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   const chartData = [
     { name: "Matched", count: data.skills_detected?.length || 0 },
     { name: "Missing", count: data.missing_skills?.length || 0 }
@@ -412,9 +436,32 @@ export default function DashboardPage() {
                   Target: <span className="text-[var(--text-secondary)] font-medium">{displayTargetRole}</span>
                 </p>
               </div>
+              {/* Action buttons */}
+              <div className="flex items-center gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleShareResults}
+                  disabled={isSharing}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-sm font-medium hover:text-[var(--accent-lavender)] hover:border-[var(--accent-lavender)]/30 transition-all"
+                >
+                  {isSharing ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}
+                  {isSharing ? 'Capturing…' : 'Share Results'}
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleExportPDF}
+                  disabled={isExporting}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-warm-dim)] border border-[var(--accent-warm)]/20 text-[var(--accent-warm)] text-sm font-medium hover:bg-[var(--accent-warm)]/20 transition-all"
+                >
+                  {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  {isExporting ? 'Exporting…' : 'Export PDF'}
+                </motion.button>
+              </div>
             </motion.header>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" ref={shareRef}>
 
               {/* ===== MAIN COLUMN ===== */}
               <div className="lg:col-span-2 space-y-6">
