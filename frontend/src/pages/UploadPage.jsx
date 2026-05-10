@@ -25,8 +25,6 @@ export default function UploadPage() {
     "Frontend Developer",
     "Cyber Security Analyst"
   ]);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
   const navigate = useNavigate();
   const pollRef = useRef(null); // setInterval ID for cleanup
 
@@ -47,17 +45,6 @@ export default function UploadPage() {
         pollRef.current = null;
       }
     };
-  }, []);
-
-  // Click outside to close dropdown
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -308,63 +295,20 @@ export default function UploadPage() {
                     <Briefcase size={15} className="text-[var(--accent-warm)]" />
                     Target Role
                   </label>
-                  <div className="relative" ref={dropdownRef}>
-                    <button
-                      type="button"
-                      onClick={() => !loading && setIsDropdownOpen(!isDropdownOpen)}
-                      className={`w-full flex items-center justify-between bg-[var(--bg-deep)] border text-[var(--text-primary)] text-sm rounded-xl p-4 transition-all ${
-                        isDropdownOpen ? 'border-[var(--accent-warm)] shadow-[0_0_15px_rgba(232,168,73,0.1)]' : 'border-[var(--border-subtle)] hover:border-[var(--border-hover)] cursor-pointer'
-                      } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  <div className="relative">
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                      disabled={loading}
+                      id="role-select"
+                      className="w-full appearance-none bg-[var(--bg-deep)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-sm rounded-xl p-4 pr-10 transition-all cursor-pointer hover:border-[var(--border-hover)]"
                     >
-                      <span>{role === "Auto Detect" ? "Auto Detect (Best Match)" : role === "Custom" ? "Other (Type your own)" : role}</span>
-                      <ChevronDown size={16} className={`text-[var(--text-muted)] transition-transform duration-300 ${isDropdownOpen ? 'rotate-180 text-[var(--accent-warm)]' : ''}`} />
-                    </button>
-
-                    <AnimatePresence>
-                      {isDropdownOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          className="absolute z-50 w-full mt-2 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
-                        >
-                          <div className="max-h-60 overflow-y-auto scrollbar-custom py-2">
-                            {roleOptions.map(r => (
-                              <button
-                                key={r}
-                                type="button"
-                                onClick={() => {
-                                  setRole(r);
-                                  setIsDropdownOpen(false);
-                                  if (r !== "Custom") setCustomRole("");
-                                }}
-                                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                                  role === r 
-                                    ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] font-medium' 
-                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
-                                }`}
-                              >
-                                {r === "Auto Detect" ? "Auto Detect (Best Match)" : r}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRole("Custom");
-                                setIsDropdownOpen(false);
-                              }}
-                              className={`w-full text-left px-4 py-3 text-sm transition-colors border-t border-[var(--border-subtle)] mt-1 pt-3 ${
-                                role === "Custom" 
-                                  ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] font-medium' 
-                                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
-                              }`}
-                            >
-                              Other (Type your own)
-                            </button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                      {roleOptions.map(r => (
+                        <option key={r} value={r}>{r === "Auto Detect" ? "Auto Detect (Best Match)" : r}</option>
+                      ))}
+                      <option value="Custom">Other (Type your own)</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
                   </div>
 
                   <AnimatePresence>

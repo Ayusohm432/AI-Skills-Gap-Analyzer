@@ -8,7 +8,6 @@ import UploadPage from './pages/UploadPage';
 import DashboardPage from './pages/DashboardPage';
 import MarketPage from './pages/MarketPage';
 import ProfilePage from './pages/ProfilePage';
-import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -20,7 +19,6 @@ function AnimatedRoutes() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
-        <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
         <Route path="/upload" element={
           <ProtectedRoute>
             <UploadPage />
