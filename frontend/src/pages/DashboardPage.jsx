@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, PieChart, Pie } from "recharts";
 import { jsPDF } from 'jspdf';
+import { toPng } from 'html-to-image';
 import {
   CheckCircle2, XCircle, Zap, Download, MessageSquare,
   ChevronRight, ArrowLeft, BookOpen, Loader2, Target, BarChart2, Activity, Filter, RefreshCw,
-  Check, ExternalLink, Clock, Trophy, Bot
+  Check, ExternalLink, Clock, Trophy, Bot, Share2, Sparkles, Play
 } from "lucide-react";
 import InteractiveBackground from "../components/InteractiveBackground";
 import Navbar from "../components/Navbar";
@@ -18,7 +19,7 @@ import { secureFetch } from "../api/base";
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 20 },
   animate: { opacity: 1, y: 0 },
-  transition: { delay, duration: 0.5, ease: [0.22, 1, 0.36, 1] }
+  transition: { delay, type: 'spring', stiffness: 260, damping: 20 }
 });
 
 // Respect prefers-reduced-motion (ui-ux-pro-max: Severity High)
@@ -41,6 +42,7 @@ export default function DashboardPage() {
   const [userSelectedRole, setUserSelectedRole] = useState("Auto Detect");
   const [chartView, setChartView] = useState("radar"); // "radar" | "bar"
   const [selectedCategory, setSelectedCategory] = useState(null); // donut filter
+  const [activeDonutIndex, setActiveDonutIndex] = useState(null); // interactive ring chart
   const [isSwapping, setIsSwapping] = useState(false); // role swap loading
   const [swapError, setSwapError] = useState(null);
   
@@ -326,6 +328,25 @@ export default function DashboardPage() {
     }, 100);
   };
 
+  const handleShareResults = async () => {
+    if (!shareRef.current) return;
+    setIsSharing(true);
+    try {
+      const dataUrl = await toPng(shareRef.current, {
+        backgroundColor: '#0f0f0f',
+        pixelRatio: 2,
+      });
+      const link = document.createElement('a');
+      link.download = `SkillGap_Results_${data.target_role?.replace(/\s+/g, '_') || 'Report'}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Share screenshot failed:', err);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   const chartData = [
     { name: "Matched", count: data.skills_detected?.length || 0 },
     { name: "Missing", count: data.missing_skills?.length || 0 }
@@ -338,6 +359,12 @@ export default function DashboardPage() {
     : data.readiness_score >= 40
       ? 'var(--accent-warm)'
       : 'var(--accent-coral)';
+
+  const scoreColorDim = data.readiness_score >= 70
+    ? 'var(--accent-teal-dim)'
+    : data.readiness_score >= 40
+      ? 'var(--accent-warm-dim)'
+      : 'var(--accent-coral-dim)';
 
   // Determine what to display in the header
   const displayTargetRole = userSelectedRole !== "Auto Detect" ? userSelectedRole : (data.predicted_role || "Unknown");
@@ -391,9 +418,32 @@ export default function DashboardPage() {
                   Target: <span className="text-[var(--text-secondary)] font-medium">{displayTargetRole}</span>
                 </p>
               </div>
+              {/* Action buttons */}
+              <div className="flex items-center gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleShareResults}
+                  disabled={isSharing}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-sm font-medium hover:text-[var(--accent-lavender)] hover:border-[var(--accent-lavender-dim)] transition-all"
+                >
+                  {isSharing ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}
+                  {isSharing ? 'Capturing…' : 'Share Results'}
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleExportPDF}
+                  disabled={isExporting}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-warm-dim)] border border-[var(--accent-warm-dim)] text-[var(--accent-warm)] text-sm font-medium hover:bg-[var(--accent-warm-dim)] transition-all"
+                >
+                  {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  {isExporting ? 'Exporting…' : 'Export PDF'}
+                </motion.button>
+              </div>
             </motion.header>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" ref={shareRef}>
 
               {/* ===== MAIN COLUMN ===== */}
               <div className="lg:col-span-2 space-y-6">
@@ -423,7 +473,7 @@ export default function DashboardPage() {
                             initial={{ opacity: 0, scale: 0.8 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: i * 0.03 }}
-                            className="px-3.5 py-1.5 bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal)]/15 text-sm rounded-lg font-medium"
+                            className="px-3.5 py-1.5 bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal-dim)] text-sm rounded-lg font-medium"
                           >
                             {skill}
                           </motion.span>
@@ -487,7 +537,7 @@ export default function DashboardPage() {
                                     initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
                                     animate={{ opacity: 1, x: 0 }}
                                     transition={{ delay: i * 0.04 }}
-                                    className="group flex items-center gap-3 bg-[var(--bg-deep)]/50 border border-[var(--border-subtle)] rounded-xl px-4 py-3 hover:border-[var(--border-hover)] transition-colors duration-200"
+                                    className="group flex items-center gap-3 bg-[rgba(15,15,15,0.5)] border border-[var(--border-subtle)] rounded-xl px-4 py-3 hover:border-[var(--border-hover)] transition-colors duration-200"
                                   >
                                     {/* Rank number */}
                                     <span className="text-[10px] font-bold text-[var(--text-muted)] w-4 shrink-0 text-center">
@@ -571,7 +621,7 @@ export default function DashboardPage() {
                             <button
                               onClick={() => setChartView("radar")}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer ${chartView === "radar"
-                                  ? "bg-[var(--accent-lavender-dim)] text-[var(--accent-lavender)] border border-[var(--accent-lavender)]/20"
+                                  ? "bg-[var(--accent-lavender-dim)] text-[var(--accent-lavender)] border border-[var(--accent-lavender-dim)]"
                                   : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 }`}
                             >
@@ -581,7 +631,7 @@ export default function DashboardPage() {
                             <button
                               onClick={() => setChartView("bar")}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-200 cursor-pointer ${chartView === "bar"
-                                  ? "bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] border border-[var(--accent-warm)]/20"
+                                  ? "bg-[var(--accent-warm-dim)] text-[var(--accent-warm)] border border-[var(--accent-warm-dim)]"
                                   : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 }`}
                             >
@@ -649,9 +699,9 @@ export default function DashboardPage() {
                               {/* Category chips */}
                               <div className="flex flex-wrap gap-2 mt-6">
                                 {Object.entries(cats).filter(([, s]) => Array.isArray(s) && s.length > 0).map(([cat, skills]) => (
-                                  <span key={cat} className="flex items-center gap-1.5 px-2.5 py-1 bg-[var(--accent-lavender-dim)] border border-[var(--accent-lavender)]/20 text-[var(--accent-lavender)] text-xs rounded-md font-medium">
+                                  <span key={cat} className="flex items-center gap-1.5 px-2.5 py-1 bg-[var(--accent-lavender-dim)] border border-[var(--accent-lavender-dim)] text-[var(--accent-lavender)] text-xs rounded-md font-medium">
                                     {cat.replace(/_/g, " ")}
-                                    <span className="text-[var(--accent-lavender)]/60">·</span>
+                                    <span className="text-[var(--accent-lavender-dim)]">·</span>
                                     {skills.length}
                                   </span>
                                 ))}
@@ -873,7 +923,7 @@ export default function DashboardPage() {
                                 </button>
 
                                 {/* Card */}
-                                <div className={`flex-1 min-w-0 bg-[var(--bg-deep)]/60 border border-[var(--border-subtle)] rounded-xl p-5 transition-all duration-300 hover:border-[var(--border-hover)] hover:-translate-y-0.5 ${isDone ? 'timeline-card-complete' : ''}`}>
+                                <div className={`flex-1 min-w-0 bg-[rgba(15,15,15,0.6)] border border-[var(--border-subtle)] rounded-xl p-5 transition-all duration-300 hover:border-[var(--border-hover)] hover:-translate-y-0.5 ${isDone ? 'timeline-card-complete' : ''}`}>
                                   {/* Phase badge + week label */}
                                   <div className="flex items-center gap-3 mb-3">
                                     <span className={`px-2.5 py-1 text-xs font-semibold rounded-md ${
@@ -985,7 +1035,7 @@ export default function DashboardPage() {
                                   initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.8 }}
                                   animate={{ opacity: 1, scale: 1 }}
                                   transition={{ delay: 0.3 + i * 0.05 }}
-                                  className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal)]/15 text-[10px] rounded-md font-medium"
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal-dim)] text-[10px] rounded-md font-medium"
                                 >
                                   <span className="w-1 h-1 rounded-full bg-[var(--accent-teal)]" />
                                   {skill}
@@ -1018,7 +1068,7 @@ export default function DashboardPage() {
                                     whileTap={{ scale: 0.97 }}
                                     disabled={isSwapping}
                                     onClick={() => handleRoleSwap(roleName)}
-                                    className="flex items-center gap-2.5 w-full text-left px-3 py-2 bg-[var(--bg-deep)]/50 border border-[var(--border-subtle)] rounded-lg hover:border-[var(--accent-warm)]/40 hover:bg-[var(--accent-warm-dim)] transition-all duration-200 cursor-pointer group disabled:opacity-50 disabled:cursor-wait"
+                                    className="flex items-center gap-2.5 w-full text-left px-3 py-2 bg-[rgba(15,15,15,0.5)] border border-[var(--border-subtle)] rounded-lg hover:border-[var(--accent-warm-dim)] hover:bg-[var(--accent-warm-dim)] transition-all duration-200 cursor-pointer group disabled:opacity-50 disabled:cursor-wait"
                                   >
                                     <RefreshCw size={10} className="text-[var(--text-muted)] group-hover:text-[var(--accent-warm)] transition-colors shrink-0" />
                                     <span className="text-xs text-[var(--text-secondary)] font-medium flex-1 truncate group-hover:text-[var(--text-primary)] transition-colors">
@@ -1075,7 +1125,7 @@ export default function DashboardPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[var(--bg-deep)]/80 backdrop-blur-sm rounded-2xl"
+                        className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[rgba(15,15,15,0.8)] backdrop-blur-sm rounded-2xl"
                       >
                         <Loader2 size={28} className="animate-spin text-[var(--accent-warm)] mb-3" />
                         <p className="text-sm font-medium text-[var(--text-primary)]">Switching role...</p>
@@ -1186,53 +1236,64 @@ export default function DashboardPage() {
                           )}
                         </div>
 
-                        {/* Donut */}
+                        {/* Improved Interactive Ring Chart */}
                         <div className="relative h-48 w-full">
                           <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                             <PieChart>
                               <Pie
+                                activeIndex={activeDonutIndex}
+                                activeShape={(props) => {
+                                  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
+                                  return (
+                                    <g>
+                                      <path d={`M ${cx + (outerRadius + 8) * Math.cos(-startAngle * Math.PI / 180)},${cy + (outerRadius + 8) * Math.sin(-startAngle * Math.PI / 180)} A ${outerRadius + 8},${outerRadius + 8} 0 0,0 ${cx + (outerRadius + 8) * Math.cos(-endAngle * Math.PI / 180)},${cy + (outerRadius + 8) * Math.sin(-endAngle * Math.PI / 180)} L ${cx + (innerRadius - 4) * Math.cos(-endAngle * Math.PI / 180)},${cy + (innerRadius - 4) * Math.sin(-endAngle * Math.PI / 180)} A ${innerRadius - 4},${innerRadius - 4} 0 0,1 ${cx + (innerRadius - 4) * Math.cos(-startAngle * Math.PI / 180)},${cy + (innerRadius - 4) * Math.sin(-startAngle * Math.PI / 180)} Z`} fill={fill} style={{ filter: `drop-shadow(0px 0px 8px ${fill}60)` }} className="transition-all duration-300" />
+                                    </g>
+                                  );
+                                }}
                                 data={donutData}
                                 cx="50%"
                                 cy="50%"
-                                innerRadius={50}
-                                outerRadius={72}
-                                paddingAngle={3}
+                                innerRadius={54}
+                                outerRadius={70}
+                                paddingAngle={4}
                                 dataKey="value"
                                 stroke="none"
+                                onMouseEnter={(_, index) => setActiveDonutIndex(index)}
+                                onMouseLeave={() => setActiveDonutIndex(null)}
                                 onClick={(entry) => {
                                   setSelectedCategory(prev => prev === entry.rawCat ? null : entry.rawCat);
                                 }}
-                                className="cursor-pointer"
+                                className="cursor-pointer outline-none"
                               >
                                 {donutData.map((entry, idx) => (
                                   <Cell
                                     key={idx}
                                     fill={entry.fill}
-                                    opacity={selectedCategory && selectedCategory !== entry.rawCat ? 0.3 : 1}
-                                    strokeWidth={selectedCategory === entry.rawCat ? 2 : 0}
-                                    stroke={selectedCategory === entry.rawCat ? entry.fill : 'none'}
+                                    opacity={selectedCategory && selectedCategory !== entry.rawCat ? 0.2 : 1}
+                                    className="transition-opacity duration-300 outline-none"
                                   />
                                 ))}
                               </Pie>
                               <Tooltip
                                 contentStyle={{
-                                  backgroundColor: 'var(--bg-surface)',
+                                  backgroundColor: 'var(--bg-deep)',
                                   borderColor: 'var(--border-subtle)',
                                   color: 'var(--text-primary)',
-                                  borderRadius: '10px',
+                                  borderRadius: '12px',
                                   fontSize: '12px',
-                                  boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
+                                  padding: '8px 12px',
+                                  boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
                                 }}
-                                itemStyle={{ color: 'var(--text-primary)' }}
-                                labelStyle={{ color: 'var(--text-muted)' }}
+                                itemStyle={{ color: 'var(--text-primary)', fontWeight: 600 }}
+                                labelStyle={{ display: 'none' }}
                                 formatter={(value, name) => [`${value} skill${value !== 1 ? 's' : ''}`, name]}
                               />
                             </PieChart>
                           </ResponsiveContainer>
                           {/* Center label */}
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                            <span className="text-2xl font-bold text-[var(--text-primary)]">{totalSkills}</span>
-                            <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Skills</span>
+                            <span className="text-3xl font-black text-[var(--text-primary)] tracking-tight">{totalSkills}</span>
+                            <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mt-0.5">Skills</span>
                           </div>
                         </div>
 
@@ -1258,65 +1319,143 @@ export default function DashboardPage() {
                   );
                 })()}
 
-                {/* Interview Prep */}
-                <motion.div {...fadeUp(0.25)} className="glass-card p-8 noise-overlay overflow-hidden relative">
+                {/* Interview Prep — Premium Preview Card */}
+                <motion.div {...fadeUp(0.25)} className="glass-card noise-overlay overflow-hidden relative">
+                  {/* Lavender ambient glow */}
+                  <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-20 blur-3xl pointer-events-none" style={{ background: 'var(--accent-lavender)' }} />
+
                   <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-8">
-                      <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-[var(--accent-lavender-dim)] flex items-center justify-center">
-                          <MessageSquare size={18} className="text-[var(--accent-lavender)]" />
+                    {/* Header */}
+                    <div className="flex items-start justify-between p-8 pb-5">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-xl bg-[var(--accent-lavender-dim)] flex items-center justify-center">
+                            <Bot size={20} className="text-[var(--accent-lavender)]" />
+                          </div>
+                          <motion.div
+                            className="absolute inset-0 rounded-xl border border-[var(--accent-lavender)]"
+                            animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
+                            transition={{ duration: 2.5, repeat: Infinity }}
+                          />
                         </div>
-                        Interview Prep
-                      </h2>
+                        <div>
+                          <h2 className="text-base font-bold text-[var(--text-primary)]">Mock Interview</h2>
+                          <p className="text-xs text-[var(--text-muted)]">AI-powered practice session</p>
+                        </div>
+                      </div>
+
+                      {/* Stats chips */}
                       {data.interview_questions?.length > 0 && (
-                        <button
-                          onClick={() => setIsInterviewActive(true)}
-                          className="flex items-center gap-2 text-xs font-medium px-4 py-2 rounded-lg bg-[var(--accent-lavender)] text-white hover:bg-[var(--accent-lavender)]/90 transition-all shadow-sm shadow-[var(--accent-lavender)]/20"
-                        >
-                          <Bot size={14} /> Start Mock Interview
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
+                            <MessageSquare size={10} className="text-[var(--accent-lavender)]" />
+                            <span className="text-[11px] font-semibold text-[var(--text-secondary)]">{data.interview_questions.length} Q</span>
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    <div className="space-y-3">
-                      {data.interview_questions?.length === 0 && (
-                        <p className="text-sm text-[var(--text-muted)]">No interview questions generated.</p>
-                      )}
-                      {data.interview_questions?.map((q, idx) => (
-                        <motion.div
-                          key={idx}
-                          initial={{ opacity: 0, x: 10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.4 + idx * 0.08 }}
-                          onClick={() => setIsInterviewActive(true)}
-                          className="group bg-[var(--bg-deep)]/60 border border-[var(--border-subtle)] p-4 rounded-xl hover:border-[var(--accent-lavender)]/30 transition-all duration-300 cursor-pointer flex gap-3 items-start hover:bg-[var(--accent-lavender-dim)]"
-                        >
-                          <div className="w-7 h-7 rounded-lg bg-[var(--accent-lavender-dim)] flex items-center justify-center text-[var(--accent-lavender)] text-xs font-bold shrink-0 group-hover:bg-[var(--accent-lavender)]/20 transition-colors">
-                            {idx + 1}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-[var(--text-secondary)] leading-relaxed group-hover:text-[var(--text-primary)] transition-colors">
-                              {typeof q === 'string' ? q : q.question}
-                            </p>
-                            {typeof q === 'object' && q.category && (
-                              <div className="flex gap-2 mt-2">
-                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-medium">
-                                  {q.category}
-                                </span>
-                                {q.difficulty && (
-                                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${q.difficulty.toLowerCase() === 'hard' ? 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)]' :
-                                      q.difficulty.toLowerCase() === 'medium' ? 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)]' :
-                                        'bg-[var(--accent-teal-dim)] text-[var(--accent-teal)]'
-                                    }`}>
-                                    {q.difficulty}
+                    {/* Empty state */}
+                    {(!data.interview_questions || data.interview_questions.length === 0) && (
+                      <div className="flex flex-col items-center justify-center py-10 text-center px-8">
+                        <MessageSquare size={28} className="text-[var(--text-muted)] mb-3" />
+                        <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">No questions generated</p>
+                        <p className="text-xs text-[var(--text-muted)]">Re-analyze your resume to get mock interview questions.</p>
+                      </div>
+                    )}
+
+                    {/* Question preview list */}
+                    {data.interview_questions?.length > 0 && (
+                      <div className="px-6 pb-5 space-y-2">
+                        {data.interview_questions.slice(0, 4).map((q, idx) => {
+                          const qText = typeof q === 'string' ? q : q.question;
+                          const diff  = typeof q === 'object' ? q.difficulty?.toLowerCase() : null;
+                          const cat   = typeof q === 'object' ? q.category : null;
+                          const diffConfig = {
+                            hard:   { cls: 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)]',   dot: 'bg-[var(--accent-coral)]' },
+                            medium: { cls: 'bg-[var(--accent-warm-dim)] text-[var(--accent-warm)]',     dot: 'bg-[var(--accent-warm)]' },
+                            easy:   { cls: 'bg-[var(--accent-teal-dim)] text-[var(--accent-teal)]',     dot: 'bg-[var(--accent-teal)]' },
+                          };
+                          const dc = diffConfig[diff] || diffConfig.medium;
+
+                          return (
+                            <motion.div
+                              key={idx}
+                              initial={{ opacity: 0, x: 12 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.35 + idx * 0.07, type: 'spring', stiffness: 280, damping: 24 }}
+                              onClick={() => setIsInterviewActive(true)}
+                              className="group flex items-start gap-3 px-4 py-3 rounded-xl bg-[rgba(15,15,15,0.5)] border border-[var(--border-subtle)] hover:border-[var(--accent-lavender-dim)] hover:bg-[var(--accent-lavender-dim)] transition-all duration-200 cursor-pointer"
+                            >
+                              {/* Number */}
+                              <span className="w-5 h-5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-center text-[10px] font-bold text-[var(--text-muted)] shrink-0 mt-0.5 group-hover:border-[var(--accent-lavender-dim)] group-hover:text-[var(--accent-lavender)] transition-colors">
+                                {idx + 1}
+                              </span>
+
+                              {/* Question text */}
+                              <p className="flex-1 text-xs text-[var(--text-secondary)] leading-relaxed group-hover:text-[var(--text-primary)] transition-colors line-clamp-2">
+                                {qText}
+                              </p>
+
+                              {/* Badges */}
+                              <div className="flex flex-col items-end gap-1 shrink-0">
+                                {diff && (
+                                  <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${dc.cls}`}>
+                                    <span className={`w-1 h-1 rounded-full ${dc.dot}`} />
+                                    {diff.charAt(0).toUpperCase() + diff.slice(1)}
+                                  </span>
+                                )}
+                                {cat && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-medium">
+                                    {cat}
                                   </span>
                                 )}
                               </div>
-                            )}
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
+
+                              <ChevronRight size={13} className="text-[var(--text-muted)] group-hover:text-[var(--accent-lavender)] shrink-0 mt-0.5 transition-colors" />
+                            </motion.div>
+                          );
+                        })}
+
+                        {data.interview_questions.length > 4 && (
+                          <p className="text-[10px] text-[var(--text-muted)] text-center pt-1">
+                            +{data.interview_questions.length - 4} more questions in the session
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* CTA Footer */}
+                    {data.interview_questions?.length > 0 && (
+                      <div className="px-6 pb-6">
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => setIsInterviewActive(true)}
+                          className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl text-sm font-bold text-white transition-all relative overflow-hidden"
+                          style={{
+                            background: 'linear-gradient(135deg, var(--accent-lavender) 0%, #7b6bb0 100%)',
+                            boxShadow: '0 4px 20px rgba(155,142,196,0.30)'
+                          }}
+                        >
+                          {/* Shimmer sweep */}
+                          <motion.div
+                            className="absolute inset-0 pointer-events-none"
+                            style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%)' }}
+                            initial={{ x: '-100%' }}
+                            whileHover={{ x: '100%' }}
+                            transition={{ duration: 0.55 }}
+                          />
+                          <Play size={15} className="fill-white" />
+                          Begin Mock Interview
+                          <Sparkles size={13} className="opacity-80" />
+                        </motion.button>
+
+                        <p className="text-[10px] text-[var(--text-muted)] text-center mt-2.5">
+                          Adaptive AI questions · Real-time feedback · Restart anytime
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
 
