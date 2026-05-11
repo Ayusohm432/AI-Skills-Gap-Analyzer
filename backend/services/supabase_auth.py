@@ -29,7 +29,10 @@ load_dotenv()
 
 logger = logging.getLogger("services.supabase_auth")
 
-_SUPABASE_URL: str = os.getenv("SUPABASE_URL", "").rstrip("/")
+_SUPABASE_URL: str = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+if _SUPABASE_URL and not _SUPABASE_URL.startswith(("http://", "https://")):
+    _SUPABASE_URL = f"https://{_SUPABASE_URL}"
+
 _SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
 
 

@@ -71,3 +71,35 @@ export const logoutApi = async () => {
     clearAccessToken();
   }
 };
+
+export const forgotPasswordApi = async (email) => {
+  const res = await secureFetch('/api/v1/auth/password/forgot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email })
+  });
+  
+  if (res.ok) {
+    return await res.json();
+  }
+  
+  const errorData = await res.json().catch(() => ({}));
+  throw new Error(errorData.detail || 'Failed to request password reset');
+};
+
+export const resetPasswordApi = async (email, otp, newPassword) => {
+  const res = await secureFetch('/api/v1/auth/password/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, otp, new_password: newPassword })
+  });
+  
+  if (res.ok) {
+    const data = await res.json();
+    setAccessToken(data.access_token);
+    return data;
+  }
+  
+  const errorData = await res.json().catch(() => ({}));
+  throw new Error(errorData.detail || 'Failed to reset password');
+};

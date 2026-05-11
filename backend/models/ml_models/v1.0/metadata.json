@@ -1,48 +1,18 @@
 {
-    "model_name": "RF Role Predictor",
+    "model_name": "Skill Vocabulary Embeddings",
     "version": "v1.0",
-    "training_date": "2026-05-10T17:58:12.969966+00:00",
-    "accuracy": 0.997778,
-    "f1_score": 0.997766,
-    "training_samples": 1796,
-    "test_samples": 450,
-    "git_commit": "f58015f",
+    "training_date": "2026-05-11T07:13:48.155296+00:00",
+    "accuracy": 1.0,
+    "f1_score": 1.0,
+    "training_samples": 5656,
+    "test_samples": 0,
+    "git_commit": "4b90e37",
     "extra": {
-        "best_params": {
-            "max_depth": 20,
-            "max_features": "log2",
-            "min_samples_split": 2,
-            "n_estimators": 200
-        },
-        "best_cv_score": 1.0,
-        "param_grid": {
-            "n_estimators": [
-                100,
-                200,
-                300
-            ],
-            "max_depth": [
-                10,
-                15,
-                20,
-                "None"
-            ],
-            "min_samples_split": [
-                2,
-                5,
-                10
-            ],
-            "max_features": [
-                "sqrt",
-                "log2"
-            ]
-        },
-        "total_combinations": 72,
-        "cv_plot_path": "C:\\Users\\ak954\\Desktop\\AI-Skills-Gap-Analyzer\\backend\\models\\ml_training\\outputs\\rf_cv_scores.png",
-        "cv_results_path": "C:\\Users\\ak954\\Desktop\\AI-Skills-Gap-Analyzer\\backend\\models\\ml_training\\outputs\\rf_cv_results.json",
-        "min_precision": 0.875,
-        "min_recall": 0.857143,
-        "avg_brier_score": 0.01107,
-        "auc_roc": 0.999985
+        "embedding_model": "all-MiniLM-L6-v2",
+        "embedding_dim": 384,
+        "vocab_size": 5656,
+        "normalized": true,
+        "embeddings_file": "C:\\Users\\ak954\\Desktop\\AI-Skills-Gap-Analyzer\\backend\\models\\ml_training\\data\\skills_embeddings.npy",
+        "vocabulary_file": "C:\\Users\\ak954\\Desktop\\AI-Skills-Gap-Analyzer\\backend\\models\\ml_training\\data\\skill_vocabulary.json"
     }
 }

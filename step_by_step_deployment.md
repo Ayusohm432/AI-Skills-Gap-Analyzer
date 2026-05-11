@@ -4,7 +4,7 @@ This comprehensive guide will walk you through every single click and command re
 We will use entirely free-tier services to host this platform. Our production stack involves:
 1. **Source Code:** GitHub
 2. **Database:** MongoDB Atlas (Cloud)
-3. **Backend API:** Render.com (Free) OR **AWS App Runner** (Professional/Scalable)
+3. **Backend API:** Render.com (Free) | **AWS App Runner** (Easiest) | **AWS EC2** (Full Control)
 4. **Frontend UI:** Vercel (React / Vite)
 
 ---
@@ -84,7 +84,7 @@ We will deploy our FastAPI python code to Render.com.
    - Click "Add Environment Variable".
    - **Key 1:** `MONGO_URL` | **Value 1:** `[Paste your MongoDB URL]`
    - **Key 2:** `GEMINI_API_KEY` | **Value 2:** `[Paste your Gemini Key]`
-   - *(Optional but recommended)* **Key 2:** `PYTHON_VERSION` | **Value 2:** `3.10.0`
+   - *(Optional but recommended)* **Key 3:** `PYTHON_VERSION` | **Value 3:** `3.10.0`
 6. **Deploy:** Click **"Create Web Service"**.
 7. **Monitor the Build:** Render will now download your code, install dependencies, and start the server. You can watch the console logs. It will take roughly 3-5 minutes.
 8. **Get your API URL:** Once deployed, you will see a green "Live" badge. In the top left, under your service name, copy your backend URL (e.g., `https://ai-skill-gap-api-123.onrender.com`). **Save this to your notepad.**
@@ -125,6 +125,58 @@ If you find Render.com's free tier too slow (it sleeps after inactivity) or need
 
 ---
 
+## Step 2 (Option C): Full Control Deployment on AWS EC2 (VM)
+
+If you prefer using a Virtual Machine (VM), you can use **AWS EC2**. Since you have $140 credits, we will use a powerful enough machine to run your AI models.
+
+### ⚠️ IMPORTANT: Instance Selection
+Do **NOT** use the `t2.micro` (Free Tier). It only has 1GB of RAM and your AI models will crash it.
+Instead, use **`t3.small`** (2GB RAM) or **`t3.medium`** (4GB RAM). Your credits will easily cover this for several months.
+
+### Deployment Steps:
+1.  **Launch Instance:**
+    *   Go to **EC2 Dashboard** -> **Launch Instance**.
+    *   **Name:** `ai-gap-backend-server`.
+    *   **OS:** `Ubuntu 22.04 LTS` (recommended).
+    *   **Instance Type:** `t3.medium` (4GB RAM - safest for ML).
+    *   **Key Pair:** Create a new key pair, download the `.pem` file, and keep it safe.
+    *   **Network Settings:** 
+        *   Allow SSH (Port 22).
+        *   Allow HTTP (Port 80) and HTTPS (Port 443).
+2.  **Edit Security Group:**
+    *   Once launched, go to the instance "Security" tab.
+    *   Click the Security Group ID -> **Edit Inbound Rules**.
+    *   Add a rule: **Custom TCP**, Port: `8080`, Source: `Anywhere (0.0.0.0/0)`.
+3.  **SSH into your Server:**
+    ```bash
+    ssh -i your-key.pem ubuntu@your-public-ip
+    ```
+4.  **Install Docker on the VM:**
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y docker.io
+    sudo systemctl start docker
+    sudo usermod -aG docker ubuntu
+    # Log out and log back in for permissions to take effect
+    exit
+    ssh -i your-key.pem ubuntu@your-public-ip
+    ```
+5.  **Clone and Run:**
+    ```bash
+    git clone https://github.com/Ayusohm432/AI-Skills-Gap-Analyzer.git
+    cd ai-skill-gap/backend
+    # Create your .env file
+    nano .env
+    # (Paste your MONGO_URL, GEMINI_API_KEY, etc. Press Ctrl+O, Enter, Ctrl+X)
+    
+    # Build and Run
+    docker build -t ai-gap-backend .
+    docker run -d --name backend -p 8080:8080 --env-file .env ai-gap-backend
+    ```
+6.  **Get your URL:** Your backend is now at `http://[YOUR-PUBLIC-IP]:8080`.
+
+---
+
 ## Step 3: Deploy the Frontend UI (Vercel)
 
 We will host the React frontend on Vercel, designed for absolute speed and ease.
@@ -139,7 +191,7 @@ We will host the React frontend on Vercel, designed for absolute speed and ease.
 5. **Add Environment Variables:**
    - Expand the "Environment Variables" section.
    - **Name:** `VITE_API_URL`
-   - **Value:** `[Paste your Render Backend URL here]` (e.g., `https://ai-skill-gap-api-123.onrender.com`. Make sure there is NO trailing slash `/` at the end).
+   - **Value:** `[Paste your AWS or Render Backend URL here]` (e.g., `http://1.2.3.4:8080`. Make sure there is NO trailing slash `/` at the end).
    - Click **"Add"**.
 6. **Deploy:** Click the big **"Deploy"** button.
 7. Vercel will build your UI and deploy it. This usually takes around 1-2 minutes.
@@ -151,13 +203,12 @@ We will host the React frontend on Vercel, designed for absolute speed and ease.
 
 Our API is currently live, but we need to tell the backend to trust requests coming specifically from our new Vercel frontend.
 
-1. Go back to your **Render.com dashboard** and click on your `ai-skill-gap-api` web service.
-2. On the left sidebar, click **"Environment"**.
-3. Under Environment Variables, click "Add Environment Variable".
-4. **Key:** `FRONTEND_URL`
-5. **Value:** `[Paste your Vercel URL]` (e.g., `https://ai-skill-gap.vercel.app`. Remove any trailing slash `/`).
-6. Click **"Save Changes"**.
-7. Render will automatically restart your backend. Wait a minute for the new configuration to take effect.
+1. **If using Render:** Go to your Render dashboard -> Environment -> Add `FRONTEND_URL`.
+2. **If using EC2:** Re-run your Docker container with the added variable:
+   ```bash
+   docker stop backend && docker rm backend
+   docker run -d --name backend -p 8080:8080 -e FRONTEND_URL=https://your-vercel-app.vercel.app --env-file .env ai-gap-backend
+   ```
 
 ---
 
@@ -193,6 +244,5 @@ The deployment is live, but your production database is entirely empty. Let's pr
 5. If you receive your skills report, **Congratulations! Your system is officially live in production! 🎉**
 
 ### Troubleshooting Tips
-* **Frontend says "Network Error" or cannot login:** Your `VITE_API_URL` on Vercel is incorrect, missing, or your Render backend is asleep (Render free tiers sleep after 15 minutes of inactivity and take ~50 seconds to wake up). 
-* **Backend returns Error 500 when uploading resume:** Check the "Logs" tab on Render. It might be due to a malformed `MONGO_URL` or a missing SpaCy model (ensure `requirements.txt` has the `.whl` link we added for `en_core_web_sm`).
-* **SpaCy error in Render Logs:** Make sure your `requirements.txt` specifically has the line `https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl` instead of just `spacy`.
+* **Frontend says "Network Error" or cannot login:** Your `VITE_API_URL` on Vercel is incorrect, missing, or your backend is not accessible (check Security Groups on EC2 or "Logs" on Render).
+* **Backend returns Error 500 when uploading resume:** Check the logs. Usually due to a malformed `MONGO_URL` or missing system dependencies (handled automatically by our Dockerfile).

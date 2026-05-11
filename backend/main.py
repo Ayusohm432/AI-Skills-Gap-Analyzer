@@ -155,16 +155,20 @@ async def lifespan(app: FastAPI):
     # 3. Mock Interview indexes (TTL index for automatic session expiry)
     await ensure_indexes()
 
-    # 4. Load ML models in a thread pool so we don't block the event loop.
-    #    Results (or graceful fallback Nones) are stored in app.state.ml_models.
-    loop = asyncio.get_running_loop()
-    try:
-        bundle = await loop.run_in_executor(None, load_all_models)
-    except Exception as exc:
-        logging.getLogger("ml_loader").error("Fatal error during model loading: %s", exc)
-        bundle = None
+    # 4. Load ML models in the background so we don't block the lifespan.
+    #    This prevents Render from timing out during the port scan.
+    async def _bg_load():
+        try:
+            loop = asyncio.get_running_loop()
+            bundle = await loop.run_in_executor(None, load_all_models)
+            app.state.ml_models = bundle
+            logging.getLogger("ml_loader").info("Background model loading complete.")
+        except Exception as e:
+            logging.getLogger("ml_loader").error("Background model loading failed: %s", e)
+            app.state.ml_models = None
 
-    app.state.ml_models = bundle
+    app.state.ml_models = None
+    asyncio.create_task(_bg_load())
 
     # 5. Phase 4 — Market demand: seed collection on startup (non-blocking)
     try:

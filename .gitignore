@@ -20,6 +20,7 @@ env/
 venv_gpu
 .env
 .venv
+.env.production
 
 # IDEs and OS files
 .agent/

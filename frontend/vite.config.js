@@ -31,6 +31,20 @@ export default defineConfig(({ mode }) => {
         }
       })
     ],
-    base: env.VITE_BASE_PATH || '/',
+    // Vercel hosts at the root (/) by default. If VERCEL is present, override the VITE_BASE_PATH
+    base: env.VERCEL === '1' ? '/' : (env.VITE_BASE_PATH || '/'),
+    build: {
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom', 'react-router-dom'],
+            ui: ['lucide-react', 'motion'],
+            pdf: ['jspdf', 'html-to-image'],
+            charts: ['recharts']
+          }
+        }
+      }
+    }
   }
 })

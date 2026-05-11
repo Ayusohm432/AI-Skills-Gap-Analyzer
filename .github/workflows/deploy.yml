@@ -1,0 +1,26 @@
+name: Deploy Backend to AWS EC2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: api.pelupa.in
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/AI-Skills-Gap-Analyzer
+            git pull
+            cd backend
+            sudo docker build -t ai-gap-backend .
+            sudo docker stop backend || true
+            sudo docker rm backend || true
+            sudo docker run -d --name backend --restart always -p 8080:8080 --env-file .env ai-gap-backend

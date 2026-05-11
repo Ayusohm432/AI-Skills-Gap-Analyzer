@@ -9,6 +9,7 @@ import DashboardPage from './pages/DashboardPage';
 import MarketPage from './pages/MarketPage';
 import ProfilePage from './pages/ProfilePage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -21,6 +22,7 @@ function AnimatedRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/upload" element={
           <ProtectedRoute>
             <UploadPage />
@@ -47,12 +49,11 @@ function AnimatedRoutes() {
 }
 
 function App() {
-  // Normalize basename: remove trailing slash if present to be consistent with router matching
-  const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const basename = import.meta.env.BASE_URL;
   
   return (
     <AuthProvider>
-      <Router basename={basename}>
+      <Router basename={basename === '/' ? undefined : basename}>
         <AnimatedRoutes />
       </Router>
     </AuthProvider>
