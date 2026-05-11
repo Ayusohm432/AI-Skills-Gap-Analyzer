@@ -51,6 +51,15 @@ export default function DashboardPage() {
   const swapPollRef = useRef(null);
   const prefersReducedMotion = useReducedMotion();
 
+  // Readiness Levels state (Issue #135)
+  const [readinessLevels, setReadinessLevels] = useState(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const readinessFetchedFor = useRef(null);
+  const [selectedLevel, setSelectedLevel] = useState(null); // null | 'beginner' | 'intermediate' | 'advanced'
+  const [readinessView, setReadinessView] = useState('overall'); // 'overall' | 'beginner' | 'intermediate' | 'advanced'
+  const [isSharing, setIsSharing] = useState(false);
+  const shareRef = useRef(null);
+
   // Cleanup swap polling on unmount
   useEffect(() => {
     return () => {
@@ -168,6 +177,20 @@ export default function DashboardPage() {
       return next;
     });
   }, [data?.analysis_id]);
+
+  // Fetch readiness levels when we have a role and data
+  useEffect(() => {
+    const role = data?.predicted_role || data?.target_role;
+    if (!role || readinessFetchedFor.current === role) return;
+    readinessFetchedFor.current = role;
+    setReadinessLoading(true);
+    setReadinessLevels(null);
+    secureFetch(`/api/v1/readiness/levels?role=${encodeURIComponent(role)}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setReadinessLevels(d))
+      .catch(() => setReadinessLevels(null))
+      .finally(() => setReadinessLoading(false));
+  }, [data?.predicted_role, data?.target_role]);
 
   if (!data) {
     return (
@@ -479,124 +502,202 @@ export default function DashboardPage() {
                           </motion.span>
                         ))}
                       </div>
+
+                      {/* Level Toggle Pills */}
+                      {readinessLevels && !readinessLevels.no_analysis && (
+                        <div className="mt-5 flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-widest mr-1">View by level:</span>
+                          {[
+                            { key: null, label: 'All', icon: '◈', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)', border: 'var(--border-subtle)' },
+                            { key: 'beginner', label: 'Fresher', icon: '●', color: 'var(--accent-teal)', dim: 'var(--accent-teal-dim)', border: 'rgba(91,184,166,0.3)' },
+                            { key: 'intermediate', label: 'Experienced', icon: '●', color: 'var(--accent-lavender)', dim: 'var(--accent-lavender-dim)', border: 'rgba(143,111,246,0.3)' },
+                            { key: 'advanced', label: 'Professional', icon: '●', color: 'var(--accent-warm)', dim: 'var(--accent-warm-dim)', border: 'rgba(232,168,73,0.3)' },
+                          ].map(lvl => (
+                            <motion.button
+                              key={String(lvl.key)}
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => setSelectedLevel(lvl.key)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all duration-200 cursor-pointer ${
+                                selectedLevel === lvl.key
+                                  ? 'shadow-sm'
+                                  : 'opacity-60 hover:opacity-100'
+                              }`}
+                              style={{
+                                backgroundColor: selectedLevel === lvl.key ? lvl.dim : 'transparent',
+                                borderColor: selectedLevel === lvl.key ? lvl.border : 'var(--border-subtle)',
+                                color: selectedLevel === lvl.key ? lvl.color : 'var(--text-muted)',
+                              }}
+                            >
+                              <span style={{ color: lvl.color, fontSize: '6px' }}>{lvl.icon}</span>
+                              {lvl.label}
+                              {lvl.key && readinessLevels[lvl.key] && (
+                                <span className="ml-0.5 text-[10px] font-bold" style={{ color: lvl.color }}>
+                                  {Math.round(readinessLevels[lvl.key].score)}%
+                                </span>
+                              )}
+                            </motion.button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Missing Skills — ranked list (issue #48) */}
                     <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
-                          Skills you need to learn ({data.missing_skills?.length || 0})
-                        </p>
-                        {data.missing_skills_ranked?.length > 0 && (
-                          <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">
-                            Ranked by LSTM likelihood
-                          </span>
-                        )}
-                      </div>
+                      {/* Level-aware missing skills header */}
+                      {selectedLevel && readinessLevels?.[selectedLevel] ? (() => {
+                        const lvlData = readinessLevels[selectedLevel];
+                        const lvlMeta = {
+                          beginner:     { label: 'Fresher',       color: 'var(--accent-teal)',     dim: 'var(--accent-teal-dim)' },
+                          intermediate: { label: 'Experienced',   color: 'var(--accent-lavender)', dim: 'var(--accent-lavender-dim)' },
+                          advanced:     { label: 'Professional',  color: 'var(--accent-warm)',     dim: 'var(--accent-warm-dim)' },
+                        }[selectedLevel];
+                        const missing = lvlData.missing_skills || [];
+                        const matched = lvlData.matched_skills || [];
 
-                      {data.missing_skills?.length === 0 && (
-                        <span className="text-sm text-[var(--accent-teal)] font-medium">You're fully qualified for this role!</span>
-                      )}
-
-                      {/* Rich ranked list when backend provides missing_skills_ranked */}
-                      {data.missing_skills_ranked?.length > 0 ? (() => {
-                        const priorityOrder = { high: 0, medium: 1, low: 2 };
-                        const sorted = [...data.missing_skills_ranked]
-                          .sort((a, b) => (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1));
-                        const filtered = selectedCategory
-                          ? sorted.filter(s => (s.category || 'general') === selectedCategory)
-                          : sorted;
                         return (
                           <>
-                            {selectedCategory && (
-                              <div className="flex items-center gap-2 mb-3">
-                                <Filter size={12} className="text-[var(--accent-lavender)]" />
-                                <span className="text-xs text-[var(--text-muted)]">Filtered by: <span className="text-[var(--accent-lavender)] font-medium capitalize">{selectedCategory.replace(/_/g, ' ')}</span></span>
-                                <button onClick={() => setSelectedCategory(null)} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] ml-auto underline cursor-pointer transition-colors">Clear</button>
-                              </div>
-                            )}
-                            <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin">
-                              {filtered.slice(0, 20).map((item, i) => {
-                                const skill = typeof item === 'string' ? item : item.skill;
-                                const likelihood = item.likelihood != null
-                                  ? Math.round((item.likelihood <= 1 ? item.likelihood * 100 : item.likelihood))
-                                  : null;
-                                const priority = item.priority || 'medium';
-                                const category = item.category ? item.category.replace(/_/g, ' ') : null;
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-xs font-medium uppercase tracking-wider" style={{ color: lvlMeta.color }}>
+                                Missing for {lvlMeta.label} Level ({missing.length})
+                              </p>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md border" style={{ backgroundColor: lvlMeta.dim, color: lvlMeta.color, borderColor: `${lvlMeta.color}30` }}>
+                                {Math.round(lvlData.score)}% ready
+                              </span>
+                            </div>
 
-                                const priorityConfig = {
-                                  high: { label: 'HIGH', bar: 'bg-[var(--accent-coral)]', badge: 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border-[var(--accent-coral)]/20' },
-                                  medium: { label: 'MED', bar: 'bg-[var(--accent-warm)]', badge: 'bg-[var(--accent-warm-dim)]  text-[var(--accent-warm)]  border-[var(--accent-warm)]/20' },
-                                  low: { label: 'LOW', bar: 'bg-[var(--accent-teal)]', badge: 'bg-[var(--accent-teal-dim)]  text-[var(--accent-teal)]  border-[var(--accent-teal)]/20' },
-                                };
-                                const cfg = priorityConfig[priority] || priorityConfig.medium;
-
-                                return (
+                            {missing.length === 0 ? (
+                              <span className="text-sm font-medium" style={{ color: lvlMeta.color }}>You're fully qualified at this level! ✓</span>
+                            ) : (
+                              <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin">
+                                {missing.map((skill, i) => (
                                   <motion.div
-                                    key={skill}
-                                    initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
+                                    key={`${selectedLevel}-${skill}`}
+                                    initial={{ opacity: 0, x: -8 }}
                                     animate={{ opacity: 1, x: 0 }}
                                     transition={{ delay: i * 0.04 }}
                                     className="group flex items-center gap-3 bg-[rgba(15,15,15,0.5)] border border-[var(--border-subtle)] rounded-xl px-4 py-3 hover:border-[var(--border-hover)] transition-colors duration-200"
                                   >
-                                    {/* Rank number */}
-                                    <span className="text-[10px] font-bold text-[var(--text-muted)] w-4 shrink-0 text-center">
-                                      {i + 1}
-                                    </span>
-
-                                    {/* Skill name + category */}
+                                    <span className="text-[10px] font-bold text-[var(--text-muted)] w-4 shrink-0 text-center">{i + 1}</span>
                                     <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors truncate">
-                                        {skill}
-                                      </p>
-                                      {category && (
-                                        <span className="text-[10px] text-[var(--text-muted)] capitalize">{category}</span>
-                                      )}
+                                      <p className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors truncate">{skill}</p>
                                     </div>
-
-                                    {/* Mini likelihood bar */}
-                                    {likelihood != null && (
-                                      <div className="flex items-center gap-2 shrink-0">
-                                        <div className="w-16 h-1.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
-                                          <motion.div
-                                            className={`h-full rounded-full ${cfg.bar}`}
-                                            initial={{ width: 0 }}
-                                            animate={{ width: `${likelihood}%` }}
-                                            transition={{ duration: 0.7, ease: 'easeOut', delay: 0.1 + i * 0.04 }}
-                                          />
-                                        </div>
-                                        <span className="text-[10px] font-medium text-[var(--text-muted)] w-7 text-right">
-                                          {likelihood}%
-                                        </span>
-                                      </div>
-                                    )}
-
-                                    {/* Priority badge */}
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${cfg.badge} shrink-0`}>
-                                      {cfg.label}
-                                    </span>
+                                    <span className="w-1.5 h-1.5 rounded-full animate-pulse-soft" style={{ backgroundColor: lvlMeta.color }} />
                                   </motion.div>
-                                );
-                              })}
-                            </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Also show matched skills at this level */}
+                            {matched.length > 0 && (
+                              <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]">
+                                <p className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                                  Matched at this level ({matched.length})
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {matched.map(s => (
+                                    <span key={s} className="px-2.5 py-1 text-xs rounded-md font-medium border" style={{ backgroundColor: lvlMeta.dim, color: lvlMeta.color, borderColor: `${lvlMeta.color}15` }}>
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </>
                         );
                       })() : (
-                        /* Fallback: plain chips when ranked data not available */
-                        <div className="flex flex-wrap gap-2">
-                          {data.missing_skills?.map((skill, i) => (
-                            <motion.span
-                              key={skill}
-                              initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.8 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              transition={{ delay: i * 0.05 }}
-                              className="flex items-center gap-2 px-3.5 py-1.5 bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border border-[var(--accent-coral)]/15 text-sm rounded-lg font-medium"
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse-soft" />
-                              {skill}
-                            </motion.span>
-                          ))}
-                        </div>
+                        /* Default: original analysis missing skills */
+                        <>
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                              Skills you need to learn ({data.missing_skills?.length || 0})
+                            </p>
+                            {data.missing_skills_ranked?.length > 0 && (
+                              <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">
+                                Ranked by LSTM likelihood
+                              </span>
+                            )}
+                          </div>
+
+                          {data.missing_skills?.length === 0 && (
+                            <span className="text-sm text-[var(--accent-teal)] font-medium">You're fully qualified for this role!</span>
+                          )}
+
+                          {data.missing_skills_ranked?.length > 0 ? (() => {
+                            const priorityOrder = { high: 0, medium: 1, low: 2 };
+                            const sorted = [...data.missing_skills_ranked]
+                              .sort((a, b) => (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1));
+                            const filtered = selectedCategory
+                              ? sorted.filter(s => (s.category || 'general') === selectedCategory)
+                              : sorted;
+                            return (
+                              <>
+                                {selectedCategory && (
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <Filter size={12} className="text-[var(--accent-lavender)]" />
+                                    <span className="text-xs text-[var(--text-muted)]">Filtered by: <span className="text-[var(--accent-lavender)] font-medium capitalize">{selectedCategory.replace(/_/g, ' ')}</span></span>
+                                    <button onClick={() => setSelectedCategory(null)} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] ml-auto underline cursor-pointer transition-colors">Clear</button>
+                                  </div>
+                                )}
+                                <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin">
+                                  {filtered.slice(0, 20).map((item, i) => {
+                                    const skill = typeof item === 'string' ? item : item.skill;
+                                    const likelihood = item.likelihood != null
+                                      ? Math.round((item.likelihood <= 1 ? item.likelihood * 100 : item.likelihood))
+                                      : null;
+                                    const priority = item.priority || 'medium';
+                                    const category = item.category ? item.category.replace(/_/g, ' ') : null;
+                                    const priorityConfig = {
+                                      high: { label: 'HIGH', bar: 'bg-[var(--accent-coral)]', badge: 'bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border-[var(--accent-coral-dim)]' },
+                                      medium: { label: 'MED', bar: 'bg-[var(--accent-warm)]', badge: 'bg-[var(--accent-warm-dim)]  text-[var(--accent-warm)]  border-[var(--accent-warm-dim)]' },
+                                      low: { label: 'LOW', bar: 'bg-[var(--accent-teal)]', badge: 'bg-[var(--accent-teal-dim)]  text-[var(--accent-teal)]  border-[var(--accent-teal-dim)]' },
+                                    };
+                                    const cfg = priorityConfig[priority] || priorityConfig.medium;
+                                    return (
+                                      <motion.div
+                                        key={skill}
+                                        initial={prefersReducedMotion ? false : { opacity: 0, x: -8 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: i * 0.04 }}
+                                        className="group flex items-center gap-3 bg-[rgba(15,15,15,0.5)] border border-[var(--border-subtle)] rounded-xl px-4 py-3 hover:border-[var(--border-hover)] transition-colors duration-200"
+                                      >
+                                        <span className="text-[10px] font-bold text-[var(--text-muted)] w-4 shrink-0 text-center">{i + 1}</span>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors truncate">{skill}</p>
+                                          {category && (<span className="text-[10px] text-[var(--text-muted)] capitalize">{category}</span>)}
+                                        </div>
+                                        {likelihood != null && (
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            <div className="w-16 h-1.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+                                              <motion.div className={`h-full rounded-full ${cfg.bar}`} initial={{ width: 0 }} animate={{ width: `${likelihood}%` }} transition={{ duration: 0.7, ease: 'easeOut', delay: 0.1 + i * 0.04 }} />
+                                            </div>
+                                            <span className="text-[10px] font-medium text-[var(--text-muted)] w-7 text-right">{likelihood}%</span>
+                                          </div>
+                                        )}
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${cfg.badge} shrink-0`}>{cfg.label}</span>
+                                      </motion.div>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            );
+                          })() : (
+                            <div className="flex flex-wrap gap-2">
+                              {data.missing_skills?.map((skill, i) => (
+                                <motion.span
+                                  key={skill}
+                                  initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.8 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={{ delay: i * 0.05 }}
+                                  className="flex items-center gap-2 px-3.5 py-1.5 bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border border-[var(--accent-coral-dim)] text-sm rounded-lg font-medium"
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-coral)] animate-pulse-soft" />
+                                  {skill}
+                                </motion.span>
+                              ))}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 
@@ -1135,10 +1236,11 @@ export default function DashboardPage() {
                   </AnimatePresence>
                 </motion.div>
 
-                {/* Readiness Score */}
+                {/* Readiness Score + Job Readiness by Level */}
                 <motion.div {...fadeUp(0.15)} className="glass-card p-8 noise-overlay overflow-hidden relative group">
                   <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-8">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-6">
                       <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Readiness Score</p>
                       <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
                         <span className="w-2 h-2 rounded-full bg-[var(--accent-teal)] animate-pulse-soft" />
@@ -1146,57 +1248,143 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    {/* Circular Progress */}
-                    <div className="relative w-44 h-44 mx-auto flex items-center justify-center mb-8 group-hover:scale-105 transition-transform duration-500">
-                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg-elevated)" strokeWidth="5" />
-                        <circle
-                          cx="50" cy="50" r="42" fill="none"
-                          stroke={scoreColor}
-                          strokeWidth="6"
-                          strokeLinecap="round"
-                          strokeDasharray={`${(data.readiness_score || 0) * 2.64} 264`}
-                          className="transition-all duration-1000 ease-out"
-                          style={{ filter: `drop-shadow(0 0 8px ${scoreColor}40)` }}
-                        />
-                      </svg>
-                      <div className="absolute flex flex-col items-center">
-                        <span className="text-4xl font-bold text-[var(--text-primary)]">
-                          {Math.round(data.readiness_score || 0)}
-                          <span className="text-lg text-[var(--text-muted)] ml-0.5">%</span>
-                        </span>
-                        <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mt-1">Match</span>
-                      </div>
-                    </div>
+                    {/* Overall Card */}
+                    {(() => {
+                      const overallScore = data.readiness_score || 0;
+                      const circumference = 2 * Math.PI * 26;
+                      const filled = (overallScore / 100) * circumference;
+                      const matchedCount = data.skills_detected?.length || 0;
+                      const missingCount = data.missing_skills?.length || 0;
+                      
+                      return (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-center gap-3 p-4 rounded-xl border mb-6 transition-all duration-200"
+                          style={{ 
+                            borderColor: scoreColorDim, 
+                            background: scoreColorDim 
+                          }}
+                        >
+                          {/* Mini ring */}
+                          <div className="relative w-12 h-12 shrink-0">
+                            <svg className="w-full h-full -rotate-90" viewBox="0 0 60 60">
+                              <circle cx="30" cy="30" r="26" fill="none" stroke="var(--bg-elevated)" strokeWidth="6" />
+                              <circle cx="30" cy="30" r="26" fill="none" stroke={scoreColor} strokeWidth="6" strokeLinecap="round"
+                                strokeDasharray={`${filled} ${circumference}`}
+                                className="transition-all duration-1000 ease-out"
+                                style={{ filter: `drop-shadow(0 0 4px ${scoreColor}70)` }}
+                              />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className="text-[11px] font-bold" style={{ color: scoreColor }}>{Math.round(overallScore)}</span>
+                            </div>
+                          </div>
 
-                    {/* Bar Chart */}
-                    <div className="h-28 w-full opacity-80 group-hover:opacity-100 transition-opacity">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                        <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                          <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} />
-                          <YAxis stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-                          <Tooltip
-                            cursor={{ fill: 'var(--bg-elevated)' }}
-                            contentStyle={{
-                              backgroundColor: 'var(--bg-surface)',
-                              borderColor: 'var(--border-subtle)',
-                              color: 'var(--text-primary)',
-                              borderRadius: '10px',
-                              fontSize: '12px',
-                              boxShadow: '0 8px 30px rgba(0,0,0,0.3)'
-                            }}
-                            itemStyle={{ color: 'var(--text-primary)' }}
-                            labelStyle={{ color: 'var(--text-muted)' }}
-                          />
-                          <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                            {chartData.map((entry, index) => (
-                              <Cell key={index} fill={chartColors[index]} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                          {/* Info + bar */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <div>
+                                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: scoreColor }}>Overall Match</p>
+                                <p className="text-xs font-semibold text-[var(--text-secondary)]">Readiness Score</p>
+                              </div>
+                              <span className="text-xs font-bold shrink-0" style={{ color: scoreColor }}>{Math.round(overallScore)}%</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden">
+                              <motion.div
+                                className="h-full rounded-full"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${overallScore}%` }}
+                                transition={{ duration: 1.1, ease: 'easeOut' }}
+                                style={{ background: scoreColor, boxShadow: `0 0 6px ${scoreColor}40` }}
+                              />
+                            </div>
+                            <div className="flex gap-1.5 mt-2 text-[10px] font-semibold">
+                              <span className="px-1.5 py-0.5 rounded bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal-dim)]">✓ {matchedCount} matched</span>
+                              <span className="px-1.5 py-0.5 rounded bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border border-[var(--accent-coral-dim)]">✗ {missingCount} missing</span>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
+
+                    {/* Job Readiness by Level — 3 mini cards */}
+                    {readinessLevels && !readinessLevels.no_analysis && (() => {
+                      const levels = [
+                        { key: 'beginner', label: 'Fresher', title: 'Beginner', description: '0–2 yrs', color: 'var(--accent-teal)', borderColor: 'rgba(91,184,166,0.25)', glowColor: 'rgba(91,184,166,0.15)', gradient: 'from-[#5bb8a6] to-[#38a892]' },
+                        { key: 'intermediate', label: 'Experienced', title: 'Intermediate', description: '2–4 yrs', color: 'var(--accent-lavender)', borderColor: 'rgba(143,111,246,0.25)', glowColor: 'rgba(143,111,246,0.12)', gradient: 'from-[#8f6ff6] to-[#7054d4]' },
+                        { key: 'advanced', label: 'Professional', title: 'Advanced', description: 'Senior+', color: 'var(--accent-warm)', borderColor: 'rgba(232,168,73,0.25)', glowColor: 'rgba(232,168,73,0.12)', gradient: 'from-[#e8a849] to-[#cf8f2e]' },
+                      ];
+                      return (
+                        <>
+                          <div className="flex items-center gap-2 mb-4 pt-4 border-t border-[var(--border-subtle)]">
+                            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[var(--accent-teal-dim)] to-[var(--accent-lavender-dim)] flex items-center justify-center border border-[var(--border-subtle)]">
+                              <BarChart2 size={14} className="text-[var(--accent-teal)]" />
+                            </div>
+                            <p className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">By Experience Level</p>
+                          </div>
+                          <div className="space-y-3">
+                            {levels.map((lvl, idx) => {
+                              const d = readinessLevels[lvl.key];
+                              const score = d?.score ?? 0;
+                              const circumference = 2 * Math.PI * 26;
+                              const filled = (score / 100) * circumference;
+                              return (
+                                <motion.div
+                                  key={lvl.key}
+                                  initial={{ opacity: 0, x: 12 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: 0.2 + idx * 0.08, duration: 0.4 }}
+                                  className="flex items-center gap-3 p-3 rounded-xl border transition-all duration-200 hover:border-opacity-60"
+                                  style={{ borderColor: lvl.borderColor, background: `${lvl.glowColor}` }}
+                                >
+                                  {/* Mini ring */}
+                                  <div className="relative w-11 h-11 shrink-0">
+                                    <svg className="w-full h-full -rotate-90" viewBox="0 0 60 60">
+                                      <circle cx="30" cy="30" r="26" fill="none" stroke="var(--bg-elevated)" strokeWidth="6" />
+                                      <circle cx="30" cy="30" r="26" fill="none" stroke={lvl.color} strokeWidth="6" strokeLinecap="round"
+                                        strokeDasharray={`${filled} ${circumference}`}
+                                        className="transition-all duration-1000 ease-out"
+                                        style={{ filter: `drop-shadow(0 0 4px ${lvl.color}70)` }}
+                                      />
+                                    </svg>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                      <span className="text-[10px] font-bold" style={{ color: lvl.color }}>{Math.round(score)}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Info + bar */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: lvl.color }}>{lvl.label}</p>
+                                        <p className="text-xs font-semibold text-[var(--text-secondary)]">{lvl.title}</p>
+                                      </div>
+                                      <span className="text-xs font-bold shrink-0" style={{ color: lvl.color }}>{Math.round(score)}%</span>
+                                    </div>
+                                    <div className="h-1 w-full bg-[var(--bg-deep)] rounded-full overflow-hidden">
+                                      <motion.div
+                                        className={`h-full rounded-full bg-gradient-to-r ${lvl.gradient}`}
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${score}%` }}
+                                        transition={{ duration: 1.1, ease: 'easeOut', delay: 0.3 + idx * 0.08 }}
+                                        style={{ boxShadow: `0 0 6px ${lvl.color}40` }}
+                                      />
+                                    </div>
+                                    {d && (
+                                      <div className="flex gap-1.5 mt-1.5 text-[9px] font-semibold">
+                                        <span className="px-1.5 py-0.5 rounded bg-[var(--accent-teal-dim)] text-[var(--accent-teal)] border border-[var(--accent-teal-dim)]">✓ {d.matched_skills?.length ?? 0}</span>
+                                        <span className="px-1.5 py-0.5 rounded bg-[var(--accent-coral-dim)] text-[var(--accent-coral)] border border-[var(--accent-coral-dim)]">✗ {d.missing_skills?.length ?? 0}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </motion.div>
 
@@ -1463,6 +1651,8 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+
 
         <Footer />
         

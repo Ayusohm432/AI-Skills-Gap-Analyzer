@@ -32,3 +32,14 @@ export const getHistoryApi = async () => {
   const errorData = await res.json().catch(() => ({}));
   throw new Error(errorData.detail || 'Failed to fetch history');
 };
+
+export const disconnectGithubApi = async () => {
+  const res = await secureFetch('/api/v1/user/me/github', {
+    method: 'DELETE'
+  });
+  if (res.ok) {
+    return await res.json();
+  }
+  const errorData = await res.json().catch(() => ({}));
+  throw new Error(errorData.detail || 'Failed to disconnect GitHub');
+};
