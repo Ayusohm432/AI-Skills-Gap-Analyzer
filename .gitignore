@@ -20,6 +20,7 @@ env/
 venv_gpu
 .env
 .venv
+.env.production
 
 # IDEs and OS files
 .agent/
@@ -42,6 +43,7 @@ pnpm-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 IMPLEMENTATION_PLAN_WITH_ML.pdf
 AI-Skills-Gap-Analyzer.code-workspace
 
