@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/AI-Skills-Gap-Analyzer/sw.js', { scope: '/AI-Skills-Gap-Analyzer/' })})}
