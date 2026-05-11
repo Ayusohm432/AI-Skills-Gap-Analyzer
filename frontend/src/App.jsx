@@ -47,12 +47,11 @@ function AnimatedRoutes() {
 }
 
 function App() {
-  // Normalize basename: remove trailing slash if present to be consistent with router matching
-  const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const basename = import.meta.env.BASE_URL;
   
   return (
     <AuthProvider>
-      <Router basename={basename}>
+      <Router basename={basename === '/' ? undefined : basename}>
         <AnimatedRoutes />
       </Router>
     </AuthProvider>
