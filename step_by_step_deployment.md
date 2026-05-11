@@ -4,7 +4,7 @@ This comprehensive guide will walk you through every single click and command re
 We will use entirely free-tier services to host this platform. Our production stack involves:
 1. **Source Code:** GitHub
 2. **Database:** MongoDB Atlas (Cloud)
-3. **Backend API:** Render.com (FastAPI / Python)
+3. **Backend API:** Render.com (Free) OR **AWS App Runner** (Professional/Scalable)
 4. **Frontend UI:** Vercel (React / Vite)
 
 ---
@@ -82,12 +82,46 @@ We will deploy our FastAPI python code to Render.com.
 5. **Add Environment Variables:**
    - Scroll down to the **"Environment Variables"** block.
    - Click "Add Environment Variable".
-   - **Key 1:** `MONGO_URL`
-   - **Value 1:** `[Paste your full MongoDB connection string from your notepad]`
+   - **Key 1:** `MONGO_URL` | **Value 1:** `[Paste your MongoDB URL]`
+   - **Key 2:** `GEMINI_API_KEY` | **Value 2:** `[Paste your Gemini Key]`
    - *(Optional but recommended)* **Key 2:** `PYTHON_VERSION` | **Value 2:** `3.10.0`
 6. **Deploy:** Click **"Create Web Service"**.
 7. **Monitor the Build:** Render will now download your code, install dependencies, and start the server. You can watch the console logs. It will take roughly 3-5 minutes.
 8. **Get your API URL:** Once deployed, you will see a green "Live" badge. In the top left, under your service name, copy your backend URL (e.g., `https://ai-skill-gap-api-123.onrender.com`). **Save this to your notepad.**
+
+---
+
+## Step 2 (Option B): Professional Deployment on AWS (App Runner)
+
+If you find Render.com's free tier too slow (it sleeps after inactivity) or need more power for the ML models, **AWS App Runner** is the recommended professional choice. It is a fully managed service that handles scaling, security, and load balancing.
+
+### Why AWS App Runner?
+*   **No Sleep:** Your API is always on (unlike Render free tier).
+*   **Performance:** Faster processing for PDF parsing and ML analysis.
+*   **Docker-powered:** We use a `Dockerfile` to ensure `Tesseract OCR` and `SpaCy` work perfectly every time.
+
+### Deployment Steps:
+1.  **Sign Up:** Create an [AWS Account](https://aws.amazon.com/).
+2.  **Go to App Runner:** Search for "App Runner" in the AWS Console search bar.
+3.  **Create Service:** Click **"Create service"**.
+4.  **Source and Deployment:**
+    - **Repository type:** Source code repository.
+    - **Connect to GitHub:** Link your account and select the `ai-skill-gap` repository.
+    - **Deployment settings:** Choose **Automatic** (so it redeploys whenever you push code).
+5.  **Configure Build:**
+    - **Configuration file:** Choose **"Configure all settings here"**.
+    - **Runtime:** Choose **"Dockerfile"**. (We've already created this in the `backend/` folder).
+    - **Port:** `8080`.
+6.  **Configure Service:**
+    - **Service Name:** `ai-skills-analyzer-backend`.
+    - **Virtual CPU & Memory:** Select **1 vCPU and 2 GB RAM** (Minimum recommended for the sentence-transformers model).
+    - **Environment Variables:**
+        - Add `MONGO_URL` -> `[Your MongoDB String]`.
+        - Add `GEMINI_API_KEY` -> `[Your Gemini API Key from AI Studio]`.
+        - Add `ENVIRONMENT` -> `production`.
+7.  **Review & Create:** Click **"Create & Deploy"**. 
+    - AWS will now build your container. This takes 5-7 minutes as it installs heavy ML libraries.
+8.  **Get your URL:** Once the status is "Running", copy the **Default domain** URL (e.g., `https://xxxxxx.us-east-1.awsapprunner.com`). Use this as your `VITE_API_URL` in the next step.
 
 ---
 
