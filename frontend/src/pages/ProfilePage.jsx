@@ -162,7 +162,13 @@ export default function ProfilePage() {
   };
 
   const handleViewAnalysis = (analysis) => {
+    // Store the full analysis so DashboardPage can display it
     localStorage.setItem("analysisResult", JSON.stringify(analysis));
+    // Also stamp the role from THIS analysis so any code reading
+    // "userSelectedRole" gets the historically-correct role, not
+    // whatever was left over from the last upload session.
+    const role = analysis.predicted_role || analysis.target_role || "Auto Detect";
+    localStorage.setItem("userSelectedRole", role);
     navigate("/dashboard");
   };
 

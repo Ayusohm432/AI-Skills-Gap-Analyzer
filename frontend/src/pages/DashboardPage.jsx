@@ -76,13 +76,28 @@ export default function DashboardPage() {
     : fadeUp(delay);
 
   useEffect(() => {
-    const savedRole = localStorage.getItem("userSelectedRole");
-    if (savedRole) setUserSelectedRole(savedRole);
-
     const saved = localStorage.getItem("analysisResult");
     if (saved) {
-      setData(JSON.parse(saved));
+      const parsed = JSON.parse(saved);
+      setData(parsed);
+
+      // When viewing a historical report the analysis already knows its own role.
+      // Always prefer the role stored IN the analysis over the stale
+      // "userSelectedRole" key (which reflects the most recent upload session,
+      // not the historical one being viewed).
+      const roleFromAnalysis = parsed.predicted_role || parsed.target_role;
+      if (roleFromAnalysis) {
+        setUserSelectedRole(roleFromAnalysis);
+      } else {
+        // Fallback: restore from localStorage for the original upload flow
+        const savedRole = localStorage.getItem("userSelectedRole");
+        if (savedRole) setUserSelectedRole(savedRole);
+      }
     } else {
+      // Restore role preference for the upload flow (no stored analysis)
+      const savedRole = localStorage.getItem("userSelectedRole");
+      if (savedRole) setUserSelectedRole(savedRole);
+
       // Mock data if accessed directly
       setData({
         job_id: "DEMO-123",
