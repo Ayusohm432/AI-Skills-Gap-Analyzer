@@ -171,6 +171,9 @@ async def run_analysis(
         ml_role_result = predict_role(found_skills, ml_bundle or {}) if ml_bundle else \
             {"predicted_role": None, "confidence": 0.0, "top_roles": [], "source": "fallback"}
 
+        # Keep track of the raw ML guess for display (shown in UI even when low-confidence)
+        ml_predicted_role_raw = ml_role_result.get("predicted_role")
+
         if ml_role_result["source"] == "ml" and role == "Auto Detect":
             # High-confidence ML prediction – use it directly
             target_role       = ml_role_result["predicted_role"]
@@ -181,7 +184,7 @@ async def run_analysis(
             if ml_role_result["source"] == "low_confidence":
                 logger.warning(
                     "[job=%s] Role confidence %.4f below threshold – "
-                    "discarding ML prediction '%s', running NLP fallback",
+                    "discarding ML prediction '%s', running NLP skill-match fallback",
                     job_id,
                     ml_role_result["confidence"],
                     ml_role_result["predicted_role"],
@@ -195,12 +198,15 @@ async def run_analysis(
             target_role       = analysis["target_role"]
             identified_skills = analysis["identified_skills"]
 
-            # When ML returned low-confidence override to "Auto Detect" so the
-            # frontend knows the role was not reliably determined.
-            if ml_role_result["source"] == "low_confidence" and role == "Auto Detect":
-                target_role = "Auto Detect"
+            # NOTE: We intentionally keep the NLP-resolved role even when ML had low
+            # confidence. The NLP skill-overlap match gives the best role from the DB.
+            # Do NOT override target_role back to "Auto Detect" here.
 
-            logger.info("[job=%s] NLP role=%s (ml_source=%s)", job_id, target_role, ml_role_result["source"])
+            logger.info(
+                "[job=%s] NLP role=%s (ml_source=%s, ml_guess=%s @ %.0f%%)",
+                job_id, target_role, ml_role_result["source"],
+                ml_predicted_role_raw, ml_role_result["confidence"] * 100,
+            )
 
         # ── Step 6: LSTM missing-skills prediction (→ static lookup fallback) ─
         await _set_status(oid, "processing", step=6)
@@ -316,6 +322,7 @@ async def run_analysis(
             "model_version":          _MODEL_VERSION,
             # Provenance
             "ml_role_source":         ml_role_result["source"],
+            "ml_predicted_role":      ml_predicted_role_raw,   # raw RF guess (even if low-conf)
             "ml_missing_source":      ml_missing["source"],
             "created_at":             datetime.now(timezone.utc),
         }
@@ -341,6 +348,7 @@ async def run_analysis(
             "model_version":           _MODEL_VERSION,
             # Provenance
             "ml_role_source":          ml_role_result["source"],
+            "ml_predicted_role":       ml_predicted_role_raw,   # raw RF guess (even if low-conf)
             "ml_missing_source":       ml_missing["source"],
         }
 

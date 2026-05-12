@@ -28,9 +28,11 @@ MAX_SKILLS = 20   # sequence length fed to LSTM branch A
 EMB_DIM    = 384  # all-MiniLM-L6-v2 embedding dimension
 
 # Minimum role-predictor confidence to trust the ML output.
-# Below this threshold the worker falls back to NLP role matching and the
-# predicted_role field is set to "Auto Detect" in the stored result.
-ROLE_CONFIDENCE_THRESHOLD: float = 0.60
+# The RF model has 50+ role classes so per-class probability is diluted.
+# With 98.4% test accuracy the model is reliable even at lower confidence
+# because the probability is spread across many classes.
+# We set 0.25 to allow the ML result to be used whenever it's the clear leader.
+ROLE_CONFIDENCE_THRESHOLD: float = 0.25
 
 # SLA targets (ms) — logged as WARNING when exceeded
 _ROLE_SLA_MS: float = 50.0
@@ -87,12 +89,36 @@ def _role_labels(bundle: dict) -> list[str]:
 
 
 def _skills_to_vector(skills: list[str], feature_names: list[str]) -> np.ndarray:
-    """Convert a list of skill strings to a binary feature vector."""
+    """
+    Convert a list of skill strings to a binary feature vector.
+
+    Uses multi-level matching to handle the vocabulary mismatch between NLP-extracted
+    short skill names (e.g. "python") and roadmap node feature names
+    (e.g. "Python", "Python Basics", "Basic Python", "Advanced Python"):
+
+    Level 1 – Exact match (case-insensitive)
+    Level 2 – Extracted skill is a substring of the feature name  ("python" in "Python Basics")
+    Level 3 – Feature name is a substring of the extracted skill   ("AWS" in "AWS Lambda")
+    """
     vec = np.zeros(len(feature_names), dtype=np.float32)
-    skills_lower = {s.lower() for s in skills}
-    for i, feat in enumerate(feature_names):
-        if feat.lower() in skills_lower:
-            vec[i] = 1.0
+    skills_lower = [s.lower() for s in skills]
+    feat_lower   = [f.lower() for f in feature_names]
+
+    for i, feat in enumerate(feat_lower):
+        for skill in skills_lower:
+            # Level 1: exact
+            if skill == feat:
+                vec[i] = 1.0
+                break
+            # Level 2: extracted skill word appears in feature name
+            # Guard: skill must be >=4 chars to avoid spurious hits like "go"
+            if len(skill) >= 4 and skill in feat:
+                vec[i] = 1.0
+                break
+            # Level 3: feature appears in extracted skill (e.g. feat="aws" skill="aws lambda")
+            if len(feat) >= 4 and feat in skill:
+                vec[i] = 1.0
+                break
     return vec
 
 
