@@ -570,6 +570,7 @@ def compute_level_scores(
     missing_skills_ranked: list[dict],
     has_projects: bool = False,
     has_github: bool = False,
+    required_skills: list[str] | None = None,
 ) -> dict:
     """
     Calculate readiness scores for Beginner, Intermediate, and Advanced levels.
@@ -579,62 +580,78 @@ def compute_level_scores(
     - Intermediate: Top ``_INTERMEDIATE_THRESHOLD`` core + secondary skills. +10 if has_github.
     - Advanced:     Full skill set incl. architecture & leadership keywords. No bonus.
 
-    role is normalised to a canonical key (case-insensitive) before lookup.
+    Parameters
+    ----------
+    role              : Target role name (normalized to canonical key)
+    identified_skills : Skills found in the resume
+    missing_skills_ranked : Ranked missing skills from LSTM/gap analysis
+    has_projects      : Whether resume has a roadmap/projects (beginner bonus)
+    has_github        : Whether user has a GitHub account (intermediate bonus)
+    required_skills   : Pre-fetched required skill list for this role (e.g. from
+                        Gemini/Adzuna for custom roles). When provided, overrides
+                        the _DEFAULT_ROLES_DB lookup. Prevents custom roles from
+                        scoring 100% due to an empty required-skill list.
     """
     # ── Normalise role name ──────────────────────────────────────────────────
     canonical_role = _ROLE_ALIAS_MAP.get(role.strip().lower(), role)
 
-    identified_set = {s.lower() for s in identified_skills}
+    # Build a lowercase lookup set of all skills the candidate has.
+    # NLP extractor stores them lowercase; Gemini/Adzuna may return mixed-case.
+    # We normalise both sides to ensure case-insensitive matching.
+    identified_set = {s.strip().lower() for s in identified_skills if s.strip()}
     missing_ranked_skills = [s["skill"] for s in missing_skills_ranked]
 
-    # ── 1. Beginner ───────────────────────────────────────────────────
-    core_skills = _DEFAULT_ROLES_DB.get(canonical_role, [])[:_BEGINNER_THRESHOLD]
-    if not core_skills:
-        # Unknown role: fall back to top ranked missing skills as a proxy
-        core_skills = missing_ranked_skills[:_BEGINNER_THRESHOLD]
+    # ── Resolve the canonical required skill list ────────────────────────────
+    # Priority: caller-supplied list → _DEFAULT_ROLES_DB → ranked missing skills
+    # → identified skills themselves (last resort so we never show a flat 0%).
+    db_skills: list[str] = (
+        required_skills
+        or _DEFAULT_ROLES_DB.get(canonical_role, [])
+    )
 
-    matched_beg = [s for s in core_skills if s.lower() in identified_set]
+    # ── 1. Beginner ───────────────────────────────────────────────────
+    core_skills = db_skills[:_BEGINNER_THRESHOLD]
+    if not core_skills:
+        # Try ranked missing skills as a proxy
+        core_skills = missing_ranked_skills[:_BEGINNER_THRESHOLD]
+    if not core_skills:
+        # Last resort: the candidate's own skills are the "required" set —
+        # they score 100% at beginner level (fully covers their own skills).
+        core_skills = list(identified_skills)[:_BEGINNER_THRESHOLD]
+
+    matched_beg = [s for s in core_skills if s.strip().lower() in identified_set]
     score_beg = (len(matched_beg) / len(core_skills) * 100) if core_skills else 0.0
-    if has_projects:
-        score_beg = min(100.0, score_beg + 10.0)
-    else:
-        score_beg = min(100.0, score_beg)
+    score_beg = min(100.0, score_beg + (10.0 if has_projects else 0.0))
 
     # ── 2. Intermediate ────────────────────────────────────────────────
-    # Start with all known role skills (not just top-N), then pad with ranked
-    # missing skills — use a seen-set to avoid duplicates in the required list.
-    known_role_skills = _DEFAULT_ROLES_DB.get(canonical_role, [])[:_INTERMEDIATE_THRESHOLD]
-    seen: set[str] = {s.lower() for s in known_role_skills}
-    inter_skills = list(known_role_skills)  # copy
+    known_role_skills = db_skills[:_INTERMEDIATE_THRESHOLD]
+    seen: set[str] = {s.strip().lower() for s in known_role_skills}
+    inter_skills = list(known_role_skills)
     for s in missing_ranked_skills:
         if len(inter_skills) >= _INTERMEDIATE_THRESHOLD:
             break
-        if s.lower() not in seen:
+        if s.strip().lower() not in seen:
             inter_skills.append(s)
-            seen.add(s.lower())
+            seen.add(s.strip().lower())
+    if not inter_skills:
+        inter_skills = list(identified_skills)[:_INTERMEDIATE_THRESHOLD]
 
-    matched_inter = [s for s in inter_skills if s.lower() in identified_set]
+    matched_inter = [s for s in inter_skills if s.strip().lower() in identified_set]
     score_inter = (len(matched_inter) / len(inter_skills) * 100) if inter_skills else 0.0
-    if has_github:
-        score_inter = min(100.0, score_inter + 10.0)
-    else:
-        score_inter = min(100.0, score_inter)
+    score_inter = min(100.0, score_inter + (10.0 if has_github else 0.0))
 
     # ── 3. Advanced ───────────────────────────────────────────────────
-    # Deterministic ordering: role DB first, then ranked missing, then leadership keywords.
     adv_seen: set[str] = set()
     adv_skills: list[str] = []
-    for s in (
-        _DEFAULT_ROLES_DB.get(canonical_role, [])
-        + missing_ranked_skills
-        + _ADVANCED_KEYWORDS
-    ):
-        key = s.lower()
+    for s in (db_skills + missing_ranked_skills + _ADVANCED_KEYWORDS):
+        key = s.strip().lower()
         if key not in adv_seen:
             adv_skills.append(s)
             adv_seen.add(key)
+    if not adv_skills:
+        adv_skills = list(identified_skills) + _ADVANCED_KEYWORDS
 
-    matched_adv = [s for s in adv_skills if s.lower() in identified_set]
+    matched_adv = [s for s in adv_skills if s.strip().lower() in identified_set]
     score_adv = round(
         (len(matched_adv) / len(adv_skills) * 100) if adv_skills else 0.0, 2
     )

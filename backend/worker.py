@@ -51,6 +51,7 @@ from nlp.engine import (
     categorize_skills,          # Step 6b – KMeans-backed, rule-based fallback
 )
 from services.ai_interview_service import generate_ai_interview_questions
+from services.role_skills_service import get_required_skills_for_role
 
 logger = logging.getLogger("worker")
 
@@ -100,17 +101,26 @@ async def _set_status(
 
 
 
-def _static_skill_gap(role: str, found_skills: list[str]) -> list[str]:
+def _static_skill_gap(
+    role: str,
+    found_skills: list[str],
+    required_skills: list[str] | None = None,
+) -> list[str]:
     """
-    Rule-based fallback: return skills required for *role* that the candidate
-    does not already have.
+    Return skills required for *role* that the candidate does not already have.
 
-    Uses the built-in _DEFAULT_ROLES_DB table.  Unknown roles return an empty
-    list rather than raising so the pipeline always completes.
+    Parameters
+    ----------
+    role            : Target role name (used for _DEFAULT_ROLES_DB lookup only
+                      when required_skills is None)
+    found_skills    : Skills detected in the resume
+    required_skills : Pre-fetched required skill list (e.g. from Gemini/Adzuna).
+                      When provided, the _DEFAULT_ROLES_DB lookup is skipped.
     """
-    required = _DEFAULT_ROLES_DB.get(role, [])
+    if required_skills is None:
+        required_skills = _DEFAULT_ROLES_DB.get(role, [])
     found_lower = {s.lower() for s in found_skills}
-    return [s for s in required if s.lower() not in found_lower]
+    return [s for s in required_skills if s.lower() not in found_lower]
 
 
 # ── Main worker ───────────────────────────────────────────────────────────────
@@ -174,6 +184,11 @@ async def run_analysis(
         # Keep track of the raw ML guess for display (shown in UI even when low-confidence)
         ml_predicted_role_raw = ml_role_result.get("predicted_role")
 
+        from database import jobs_collection  # noqa: PLC0415
+        cursor   = jobs_collection.find({})
+        db_roles = await cursor.to_list(length=100)
+        roles_db = {r["role_name"]: r["required_skills"] for r in db_roles} or _DEFAULT_ROLES_DB
+
         if ml_role_result["source"] == "ml" and role == "Auto Detect":
             # High-confidence ML prediction – use it directly
             target_role       = ml_role_result["predicted_role"]
@@ -190,17 +205,9 @@ async def run_analysis(
                     ml_role_result["predicted_role"],
                 )
 
-            from database import jobs_collection  # noqa: PLC0415
-            cursor   = jobs_collection.find({})
-            db_roles = await cursor.to_list(length=100)
-            roles_db = {r["role_name"]: r["required_skills"] for r in db_roles} or _DEFAULT_ROLES_DB
             analysis          = match_role_and_skills(found_skills, roles_db, role)
             target_role       = analysis["target_role"]
             identified_skills = analysis["identified_skills"]
-
-            # NOTE: We intentionally keep the NLP-resolved role even when ML had low
-            # confidence. The NLP skill-overlap match gives the best role from the DB.
-            # Do NOT override target_role back to "Auto Detect" here.
 
             logger.info(
                 "[job=%s] NLP role=%s (ml_source=%s, ml_guess=%s @ %.0f%%)",
@@ -208,7 +215,20 @@ async def run_analysis(
                 ml_predicted_role_raw, ml_role_result["confidence"] * 100,
             )
 
-        # ── Step 6: LSTM missing-skills prediction (→ static lookup fallback) ─
+        # ── Fetch required skills for the resolved target role ─────────
+        # This is the single source of truth for skill-gap and level-score
+        # computation. For well-known roles it resolves from DB/built-ins
+        # instantly; for custom roles it calls Gemini → Adzuna → fallback.
+        required_role_skills, role_skills_source = await get_required_skills_for_role(
+            target_role or "",
+            roles_db=roles_db,
+        )
+        logger.info(
+            "[job=%s] required_skills for role=%r: %d skills (source=%s)",
+            job_id, target_role, len(required_role_skills), role_skills_source,
+        )
+
+        # ── Step 6: LSTM missing-skills prediction (→ skill-gap fallback) ─
         await _set_status(oid, "processing", step=6)
         seniority  = "Mid-level"
         ml_missing = predict_missing_skills(
@@ -220,36 +240,43 @@ async def run_analysis(
         )
 
         if ml_missing["source"] == "ml" and ml_missing["missing_skills"]:
-            # LSTM succeeded with results – use them
-            missing_skills    = ml_missing["missing_skills"]
+            # LSTM succeeded – cross-filter its output against required_role_skills
+            # so we only surface skills that are actually needed for this role.
+            lstm_missing  = ml_missing["missing_skills"]
+            found_lower   = {s.lower() for s in found_skills}
+            req_lower_map = {s.lower(): s for s in required_role_skills}
+
+            # Primary: LSTM skills that are also in required list
+            primary   = [s for s in lstm_missing if s.lower() in req_lower_map and s.lower() not in found_lower]
+            # Secondary: required skills not found in resume and not already in primary
+            primary_lower = {s.lower() for s in primary}
+            secondary = [
+                req_lower_map[k]
+                for k in req_lower_map
+                if k not in found_lower and k not in primary_lower
+            ]
+            missing_skills    = primary + secondary
             identified_skills = found_skills
             logger.info(
-                "[job=%s] LSTM predicted %d missing skills (%.2f ms)",
+                "[job=%s] LSTM+required_skills: %d missing skills (%.2f ms)",
                 job_id, len(missing_skills), ml_missing.get("inference_ms", 0.0),
             )
         else:
-            # LSTM unavailable, raised an exception, or returned nothing –
-            # use the static skill-gap lookup table as the authoritative fallback.
+            # LSTM unavailable – compute gap directly from required_role_skills.
             logger.warning(
-                "[job=%s] LSTM fallback (source=%s): using static skill-gap table for role '%s'",
+                "[job=%s] LSTM fallback (source=%s): using required_skills gap for role '%s'",
                 job_id, ml_missing["source"], target_role,
             )
-            missing_skills = _static_skill_gap(target_role or "", found_skills)
-            # Re-run NLP gap analysis when the static table has no entry for this role.
-            # `analysis` is guaranteed to be a dict here (initialized at the top of try-block;
-            # populated by the NLP fallback branch in Step 5 when used).
+            missing_skills = _static_skill_gap(
+                target_role or "",
+                found_skills,
+                required_skills=required_role_skills if required_role_skills else None,
+            )
+            # If still empty (no required skills fetched at all), use analysis gap
             if not missing_skills:
-                if ml_role_result["source"] == "ml":
-                    from database import jobs_collection  # noqa: PLC0415
-                    cursor   = jobs_collection.find({})
-                    db_roles = await cursor.to_list(length=100)
-                    roles_db = {r["role_name"]: r["required_skills"] for r in db_roles} or _DEFAULT_ROLES_DB
-                    analysis = match_role_and_skills(found_skills, roles_db, target_role or "Auto Detect")
-                missing_skills    = analysis.get("missing_skills", [])
-                identified_skills = analysis.get("identified_skills", found_skills)
-            # Tag this result so consumers know the source
-            ml_missing = {**ml_missing, "source": "static_lookup"}
-            logger.info("[job=%s] static_lookup: %d missing skills", job_id, len(missing_skills))
+                missing_skills = analysis.get("missing_skills", []) if analysis else []
+            ml_missing = {**ml_missing, "source": "skill_gap"}
+            logger.info("[job=%s] skill_gap: %d missing skills", job_id, len(missing_skills))
 
         # Readiness score (computed after roles + missing skills are settled)
         readiness_score = compute_readiness_score(identified_skills, missing_skills)
@@ -324,6 +351,8 @@ async def run_analysis(
             "ml_role_source":         ml_role_result["source"],
             "ml_predicted_role":      ml_predicted_role_raw,   # raw RF guess (even if low-conf)
             "ml_missing_source":      ml_missing["source"],
+            "required_role_skills":   required_role_skills,    # canonical required skill list
+            "role_skills_source":     role_skills_source,      # db/builtin/gemini/adzuna/fallback
             "created_at":             datetime.now(timezone.utc),
         }
         inserted = await analyses_collection.insert_one(analysis_doc)
@@ -350,6 +379,8 @@ async def run_analysis(
             "ml_role_source":          ml_role_result["source"],
             "ml_predicted_role":       ml_predicted_role_raw,   # raw RF guess (even if low-conf)
             "ml_missing_source":       ml_missing["source"],
+            "required_role_skills":    required_role_skills,    # canonical required skill list
+            "role_skills_source":      role_skills_source,      # db/builtin/gemini/adzuna/fallback
         }
 
         # ── status: completed ─────────────────────────────────────────
