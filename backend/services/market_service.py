@@ -41,6 +41,7 @@ Public API:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
@@ -372,6 +373,162 @@ async def _fetch_live_snapshot(role: str, query: str, seed: dict) -> dict:
         logger.warning("Adzuna fetch error for role=%r — falling back to seed: %s", role, exc)
 
     return _jitter_snapshot(seed)
+
+
+# ── Gemini AI market data fallback ────────────────────────────────────────────
+
+# Model priority list — first success wins, retries on 429 (quota)
+_GEMINI_MARKET_MODELS: list[str] = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+]
+
+
+async def _fetch_gemini_market_data(role: str) -> dict | None:
+    """
+    Generate synthetic but realistic market demand data for an unknown role
+    using the Google Gemini generative API.
+
+    This function is invoked as a **fallback** when:
+      - The role is not pre-seeded in SEED_DATA, AND
+      - The Adzuna live API returned zero results or failed.
+
+    Returns a fully populated snapshot dict on success, or None on failure.
+    The caller is responsible for persisting the result into MongoDB.
+
+    Prompt Template
+    ---------------
+    Uses a structured prompt that instructs the LLM to act as a senior
+    labour-market analyst and return a tightly specified JSON object.
+    Temperature is kept low (0.3) for factual consistency.
+    """
+    if genai is None:
+        logger.debug("google-genai SDK not installed — skipping Gemini market fallback")
+        return None
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        logger.debug("GEMINI_API_KEY not set — skipping Gemini market fallback")
+        return None
+
+    country      = ADZUNA_COUNTRY
+    currency     = CURRENCY_MAP.get(country, "USD")
+    country_name = {
+        "in": "India", "us": "United States", "gb": "United Kingdom",
+        "au": "Australia", "ca": "Canada", "de": "Germany",
+        "fr": "France", "sg": "Singapore", "nz": "New Zealand",
+    }.get(country, "Global")
+
+    # ── Universal Prompt Template (structured for consistent JSON output) ─────
+    prompt = (
+        f"You are a senior labour-market analyst with expertise in technology "
+        f"hiring trends across {country_name}.\n\n"
+        f"## Task\n"
+        f"Estimate the current job-market demand snapshot for the role: "
+        f"**\"{role}\"** in {country_name} ({currency} currency).\n\n"
+        f"## Output Format\n"
+        f"Return ONLY a valid JSON object — no markdown fences, no explanation, "
+        f"no extra text.\n\n"
+        f"The JSON must contain exactly these keys:\n"
+        f"  - \"demand_score\" (int, 1-100): overall hiring demand index\n"
+        f"  - \"trending_skills\" (list of 10-15 strings): most in-demand "
+        f"technical skills for this role in {country_name}\n"
+        f"  - \"salary_range\" (object with int keys \"min\", \"max\", \"median\"): "
+        f"annual salary range in {currency}\n"
+        f"  - \"total_postings\" (int): estimated number of active job listings\n\n"
+        f"## Constraints\n"
+        f"  - Base estimates on real-world 2024-2025 hiring data.\n"
+        f"  - Salary values must be in {currency} (annual, full-time).\n"
+        f"  - Skills must be specific, canonical technology names (e.g. "
+        f"\"React\", \"Kubernetes\") — not vague phrases.\n"
+        f"  - If the role is ambiguous or non-technical, still provide "
+        f"reasonable estimates; do NOT refuse.\n\n"
+        f"## Example Output\n"
+        f'{{\n'
+        f'  "demand_score": 78,\n'
+        f'  "trending_skills": ["Python", "Docker", "AWS", "PostgreSQL"],\n'
+        f'  "salary_range": {{"min": 600000, "max": 2500000, "median": 1200000}},\n'
+        f'  "total_postings": 3200\n'
+        f'}}'
+    )
+
+    def _call_gemini() -> str | None:
+        """Synchronous SDK call — runs in a thread pool via asyncio.to_thread."""
+        client = genai.Client(api_key=api_key)
+        for model in _GEMINI_MARKET_MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.3,
+                        max_output_tokens=1024,
+                    ),
+                )
+                return response.text.strip()
+            except Exception as exc:
+                if "429" in str(exc):
+                    logger.debug("Gemini %s quota hit, trying next model...", model)
+                    continue
+                logger.warning("Gemini market call failed (%s): %s", model, exc)
+                return None
+        logger.warning("All Gemini models exhausted for market data")
+        return None
+
+    try:
+        raw = await asyncio.to_thread(_call_gemini)
+        if raw is None:
+            return None
+
+        # Strip markdown fences if the model wraps the JSON in ```json ... ```
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        data = json.loads(raw)
+
+        # ── Validate and sanitise the response ────────────────────────────────
+        demand_score = max(5, min(100, int(data.get("demand_score", 50))))
+
+        trending_skills = data.get("trending_skills", [])
+        if not isinstance(trending_skills, list) or len(trending_skills) < 3:
+            logger.warning("Gemini returned insufficient skills for role=%r", role)
+            return None
+        trending_skills = [str(s).strip() for s in trending_skills if str(s).strip()][:15]
+
+        sr = data.get("salary_range", {})
+        salary_min    = int(sr.get("min", 300_000))
+        salary_max    = int(sr.get("max", 1_200_000))
+        salary_median = int(sr.get("median", (salary_min + salary_max) // 2))
+
+        total_postings = max(50, int(data.get("total_postings", 500)))
+
+        snapshot = {
+            "demand_score":    demand_score,
+            "trending_skills": trending_skills,
+            "salary_range":    {"min": salary_min, "max": salary_max, "median": salary_median},
+            "salary_currency": currency,
+            "total_postings":  total_postings,
+            "source":          "gemini",
+            "captured_at":     datetime.now(timezone.utc),
+        }
+
+        logger.info(
+            "Gemini market data for role=%r: score=%d, skills=%d, postings=%d",
+            role, demand_score, len(trending_skills), total_postings,
+        )
+        return snapshot
+
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("Gemini market data parse error for role=%r: %s", role, exc)
+    except Exception as exc:
+        logger.error("Unexpected error in _fetch_gemini_market_data for role=%r: %s", role, exc)
+
+    return None
 
 
 # ── Seeded fallback ───────────────────────────────────────────────────────────
