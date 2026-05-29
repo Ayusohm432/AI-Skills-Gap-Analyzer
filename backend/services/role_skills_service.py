@@ -112,8 +112,24 @@ def _normalize(role: str) -> str:
 
 # ── Source 1: Gemini ──────────────────────────────────────────────────────────
 
+# Model priority list — first success wins, retries on 429 (quota)
+_GEMINI_MODELS: list[str] = [
+    _GEMINI_MODEL,
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+]
+
+
 async def _fetch_skills_from_gemini(role: str) -> list[str] | None:
-    """Ask Gemini for the top required skills for `role`. Returns None on failure."""
+    """
+    Ask Gemini for the top required skills for a custom/unknown role.
+
+    Uses a structured Universal Prompt Template to produce consistent,
+    high-quality JSON output even for niche or ambiguous roles.
+
+    Fallback chain: gemini-2.0-flash → gemini-2.0-flash-lite → gemini-1.5-flash.
+    Returns None on failure (caller falls through to Adzuna → static fallback).
+    """
     if not _GEMINI_AVAILABLE:
         return None
 
@@ -121,27 +137,60 @@ async def _fetch_skills_from_gemini(role: str) -> list[str] | None:
     if not api_key:
         return None
 
+    # ── Universal Prompt Template (structured for consistent JSON output) ─────
     prompt = (
-        f"List exactly 12 technical skills required for a '{role}' job role in 2024-2025.\n"
-        "Return ONLY a JSON array of skill name strings, no explanation, no markdown:\n"
-        '["Skill 1", "Skill 2", ...]'
+        f"You are a senior technical recruiter and career strategist with deep "
+        f"expertise in technology hiring trends across all industries.\n\n"
+        f"## Task\n"
+        f"Identify exactly 12 core technical skills required for the job role: "
+        f"**\"{role}\"** in 2024-2025.\n\n"
+        f"## Output Format\n"
+        f"Return ONLY a valid JSON array of skill name strings — no markdown "
+        f"fences, no explanation, no extra text.\n\n"
+        f"## Constraints\n"
+        f"  - Skills must be specific, canonical technology/tool names "
+        f"(e.g. \"React\", \"Kubernetes\", \"PyTorch\") — not vague phrases "
+        f"like \"programming\" or \"soft skills\".\n"
+        f"  - Include a mix of foundational and advanced skills relevant "
+        f"to this specific role.\n"
+        f"  - Order skills from most essential to least essential.\n"
+        f"  - If the role is ambiguous, non-standard, or cross-functional, "
+        f"still produce a reasonable skill set — do NOT refuse.\n"
+        f"  - If the role is non-technical (e.g. \"Product Manager\"), include "
+        f"relevant analytical and tooling skills (SQL, Jira, Figma, etc.).\n\n"
+        f"## Example Output\n"
+        f'["Python", "Docker", "AWS", "PostgreSQL", "FastAPI", "Redis", '
+        f'"Kubernetes", "CI/CD", "REST APIs", "System Design", "Git", '
+        f'"Microservices"]'
     )
 
-    def _call_gemini() -> str:
+    def _call_gemini() -> str | None:
         """Synchronous SDK call — runs in a thread pool via asyncio.to_thread."""
         client = _genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=_GEMINI_MODEL,
-            contents=prompt,
-            config=_genai_types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=512,
-            ),
-        )
-        return response.text.strip()
+        for model in _GEMINI_MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=_genai_types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=512,
+                    ),
+                )
+                return response.text.strip()
+            except Exception as exc:
+                if "429" in str(exc):
+                    logger.debug("Gemini %s quota hit, trying next model...", model)
+                    continue
+                logger.warning("Gemini skills call failed (%s): %s", model, exc)
+                return None
+        logger.warning("All Gemini models exhausted for role skills")
+        return None
 
     try:
         raw = await asyncio.to_thread(_call_gemini)
+        if raw is None:
+            return None
 
         # Strip markdown fences if present
         if raw.startswith("```"):
